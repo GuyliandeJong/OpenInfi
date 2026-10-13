@@ -32,6 +32,8 @@ FINISH = 0xF0
 MODE = 0x13
 TIME = 0x28
 KEYMAP = 0x11  # base layer
+FN_KEYMAP = 0x27  # what a key does while Fn is held; same table layout
+SYSTEM = 0x17  # game mode, Windows-key lock and sleep timer, one data packet
 KEY_COLORS_PREVIEW = 0x20  # live preview only; the stored custom colours return
 KEY_COLORS = 0x23  # stored custom colours shown by CUSTOM_MODE
 
@@ -184,7 +186,7 @@ def key_entry(target: str) -> bytes:
 
 
 def keymap_payload(entries: dict[int, bytes]) -> bytes:
-    """Base-layer table: 4 bytes per key slot, zero = keep default."""
+    """Keymap table (base or Fn layer): 4 bytes per key slot, zero = keep default."""
     buf = bytearray(KEYMAP_SENT * PACKET)
     for slot, entry in entries.items():
         if not 0 < slot < KEYMAP_SLOTS or len(entry) != 4:
@@ -192,6 +194,38 @@ def keymap_payload(entries: dict[int, bytes]) -> bytes:
         buf[slot * 4 : slot * 4 + 4] = entry
     buf[KEYMAP_PACKETS * PACKET - 2 : KEYMAP_PACKETS * PACKET] = b"\xaa\x55"
     return bytes(buf)
+
+
+@dataclass
+class System:
+    """The 04 17 packet: the vendor driver always sends all of these together."""
+
+    game_mode: bool = False
+    block_alt_tab: bool = False  # only applied while game mode is on
+    block_alt_f4: bool = False
+    block_win: bool = False
+    sleep: int = 2  # vendor list entries 1-5, default 2; durations not confirmed
+    layer_flag: bool = False  # byte 5, from a two-way layer switch in the vendor UI; meaning unknown
+    sleep_light: int = 0  # byte 6, "sleep_light" in the vendor profile, default 0; meaning unknown
+
+
+SLEEP_CHOICES = range(1, 6)
+
+
+def system_data(settings: System) -> bytes:
+    if settings.sleep not in SLEEP_CHOICES:
+        raise ProtocolError(f"sleep must be 1-5, got {settings.sleep}")
+    packet = bytearray(PACKET)
+    if settings.game_mode:
+        packet[1] = 1
+        packet[2] = int(settings.block_alt_tab)
+        packet[3] = int(settings.block_alt_f4)
+        packet[4] = int(settings.block_win)
+    packet[5] = int(settings.layer_flag)
+    packet[6] = settings.sleep_light & 0xFF
+    packet[8] = settings.sleep
+    packet[62:64] = b"\xaa\x55"
+    return bytes(packet)
 
 
 def key_colors_payload(colors: dict[int, tuple[int, int, int]]) -> bytes:
@@ -280,15 +314,23 @@ class Session:
         self.send(command(SAVE))
         self.send(command(FINISH))
 
-    def write_keymap(self, entries: dict[int, bytes]) -> None:
-        """Replace the base-layer remaps; slots not in *entries* return to default."""
+    def write_keymap(self, entries: dict[int, bytes], layer: int = KEYMAP) -> None:
+        """Replace one layer's remaps (KEYMAP or FN_KEYMAP); slots not in *entries* return to default."""
+        if layer not in (KEYMAP, FN_KEYMAP):
+            raise ProtocolError(f"unknown keymap layer 0x{layer:02x}")
         payload = keymap_payload(entries)
         self.send(command(START))
-        self.send(command(KEYMAP, byte8=KEYMAP_PACKETS))
+        self.send(command(layer, byte8=KEYMAP_PACKETS))
         for offset in range(0, len(payload), PACKET):
             self.send(payload[offset : offset + PACKET], ack=False)
         self.send(command(SAVE))
         self.send(command(FINISH))
+
+    def set_system(self, settings: System) -> None:
+        self.send(command(START))
+        self.send(command(SYSTEM, byte8=1))
+        self.send(system_data(settings), ack=False)
+        self.send(command(SAVE))  # the vendor driver sends no FINISH here
 
     def set_key_colors(self, colors: dict[int, tuple[int, int, int]], brightness: int = 5) -> None:
         """Store per-key colours and switch to the custom effect that displays them."""

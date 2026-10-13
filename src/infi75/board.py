@@ -24,8 +24,30 @@ def config_dir() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "infi75"
 
 
-def keymap_state_path() -> Path:
-    return config_dir() / "keymap.json"
+LAYERS = {"base": hfd.KEYMAP, "fn": hfd.FN_KEYMAP}
+
+
+def keymap_state_path(layer: str = "base") -> Path:
+    return config_dir() / ("keymap.json" if layer == "base" else f"keymap-{layer}.json")
+
+
+def system_state_path() -> Path:
+    return config_dir() / "system.json"
+
+
+def screen_state_path() -> Path:
+    return config_dir() / "screen.json"
+
+
+def setups_dir() -> Path:
+    return config_dir() / "setups"
+
+
+def _slug(name: str) -> str:
+    slug = "".join(c if c.isalnum() or c in "-_" else "-" for c in name.strip().lower()).strip("-")
+    if not slug:
+        raise ValueError("a setup needs a name")
+    return slug
 
 
 def colors_state_path() -> Path:
@@ -34,6 +56,17 @@ def colors_state_path() -> Path:
 
 def lighting_state_path() -> Path:
     return config_dir() / "lighting.json"
+
+
+# state files that together describe everything this tool has written to the keyboard
+SETUP_PARTS = {
+    "lighting": lighting_state_path,
+    "colors": colors_state_path,
+    "keymap": lambda: keymap_state_path("base"),
+    "keymap_fn": lambda: keymap_state_path("fn"),
+    "system": system_state_path,
+    "screen": screen_state_path,
+}
 
 
 def _save_json(path: Path, data) -> None:
@@ -94,7 +127,8 @@ class InfiBoard:
         self._run(lambda s: s.set_lighting(settings))
         if not self.dry_run:
             _save_json(lighting_state_path(), {"effect": effect, "color": list(color), "brightness": brightness,
-                                               "speed": speed, "rainbow": rainbow, "direction": direction})
+                                               "speed": speed, "rainbow": rainbow, "direction": direction,
+                                               "custom": False})
 
     @staticmethod
     def saved_lighting() -> dict:
@@ -107,8 +141,12 @@ class InfiBoard:
         table = {key.index: chosen.get(key.name, tuple(default)) for key in self.profile.keys}
         self._run(lambda s: s.set_key_colors(table, brightness=brightness))
         if not self.dry_run:
-            _save_json(colors_state_path(), {"default": list(default),
+            _save_json(colors_state_path(), {"default": list(default), "brightness": brightness,
                                              "keys": {k: list(v) for k, v in sorted(chosen.items())}})
+            # the keyboard now shows the custom colours instead of the effect
+            lighting = self.saved_lighting()
+            lighting["custom"] = True
+            _save_json(lighting_state_path(), lighting)
 
     def saved_colors(self) -> tuple[dict[str, tuple[int, int, int]], tuple[int, int, int]]:
         """The per-key colours last written by this tool: ({key: rgb}, default)."""
@@ -138,29 +176,61 @@ class InfiBoard:
 
     # -------------------------------------------------------------- keymap
 
-    def remaps(self) -> dict[str, str]:
-        return _load_json(keymap_state_path(), {})
+    @staticmethod
+    def _layer(layer: str) -> int:
+        try:
+            return LAYERS[layer]
+        except KeyError:
+            raise ValueError(f"unknown layer {layer!r}; use 'base' or 'fn'") from None
 
-    def write_remaps(self, state: dict[str, str]) -> None:
-        """Write the full base-layer table; keys not in *state* keep their default."""
-        entries = {self.profile.key(name).index: hfd.key_entry(target) for name, target in state.items()}
-        self._run(lambda s: s.write_keymap(entries))
+    def remaps(self, layer: str = "base") -> dict[str, str]:
+        self._layer(layer)
+        return _load_json(keymap_state_path(layer), {})
+
+    def write_remaps(self, state: dict[str, str], layer: str = "base") -> None:
+        """Write one layer's full table; keys not in *state* keep their default."""
+        command = self._layer(layer)
+        entries = {}
+        for name, target in state.items():
+            key = self.profile.key(name)
+            if layer == "fn" and not key.fn:
+                raise ValueError(f"Fn + {key.name} is reserved by the keyboard and cannot be remapped")
+            entries[key.index] = hfd.key_entry(target)
+        self._run(lambda s: s.write_keymap(entries, command))
         if not self.dry_run:
-            _save_json(keymap_state_path(), state)
+            _save_json(keymap_state_path(layer), state)
 
-    def remap(self, key_name: str, target: str) -> dict[str, str]:
+    def remap(self, key_name: str, target: str, layer: str = "base") -> dict[str, str]:
         key = self.profile.key(key_name)
         hfd.key_entry(target)  # validate before storing
-        state = self.remaps()
+        state = self.remaps(layer)
         if target.strip().lower() in ("default", "reset"):
             state.pop(key.name, None)
         else:
             state[key.name] = target
-        self.write_remaps(state)
+        self.write_remaps(state, layer)
         return state
 
-    def reset_remaps(self) -> None:
-        self.write_remaps({})
+    def reset_remaps(self, layer: str = "base") -> None:
+        self.write_remaps({}, layer)
+
+    # -------------------------------------------------------------- system
+
+    def system(self) -> hfd.System:
+        saved = _load_json(system_state_path(), {})
+        fields = hfd.System.__dataclass_fields__
+        return hfd.System(**{k: v for k, v in saved.items() if k in fields})
+
+    def set_system(self, **changes) -> hfd.System:
+        """Change some of game mode, key blocking and sleep; the rest keep their last written value."""
+        from dataclasses import asdict, replace
+
+        settings = replace(self.system(), **changes)
+        hfd.system_data(settings)  # validate
+        self._run(lambda s: s.set_system(settings))
+        if not self.dry_run:
+            _save_json(system_state_path(), asdict(settings))
+        return settings
 
     # -------------------------------------------------------------- screen
 
@@ -179,7 +249,84 @@ class InfiBoard:
             self._run(lambda s: s.upload_screen(frames, pipe, slot=slot, progress=progress))
         finally:
             pipe.close()
+        _save_json(screen_state_path(), {"path": str(Path(path).absolute()), "fit": fit, "slot": slot})
         return len(frames)
+
+    # -------------------------------------------------------------- setups
+
+    @staticmethod
+    def setups() -> list[str]:
+        """Names of the saved setups, sorted."""
+        names = []
+        for path in sorted(setups_dir().glob("*.json")):
+            data = _load_json(path, {})
+            names.append(data.get("name", path.stem))
+        return sorted(names, key=str.lower)
+
+    @staticmethod
+    def save_setup(name: str) -> Path:
+        """Snapshot what this tool last wrote to the keyboard under *name* (replaces a setup of that name)."""
+        parts = {}
+        for part, path in SETUP_PARTS.items():
+            data = _load_json(path(), None)
+            if data:
+                parts[part] = data
+        if not parts:
+            raise ValueError("nothing to save yet: apply some settings to the keyboard first")
+        target = setups_dir() / f"{_slug(name)}.json"
+        _save_json(target, {"name": name.strip(), "saved": datetime.now().isoformat(timespec="seconds"),
+                            "parts": parts})
+        return target
+
+    @staticmethod
+    def load_setup(name: str) -> dict:
+        path = setups_dir() / f"{_slug(name)}.json"
+        data = _load_json(path, None)
+        if not data:
+            raise ValueError(f"no setup named {name!r}")
+        return data
+
+    @staticmethod
+    def delete_setup(name: str) -> None:
+        path = setups_dir() / f"{_slug(name)}.json"
+        if not path.exists():
+            raise ValueError(f"no setup named {name!r}")
+        path.unlink()
+
+    def apply_setup(self, name: str, include_screen: bool = True,
+                    progress: Callable[[int, int], None] | None = None) -> list[str]:
+        """Write a saved setup to the keyboard. Returns what was applied."""
+        parts = self.load_setup(name)["parts"]
+        done = []
+        if "system" in parts:
+            fields = hfd.System.__dataclass_fields__
+            self.set_system(**{k: v for k, v in parts["system"].items() if k in fields})
+            done.append("game mode and sleep")
+        self.write_remaps(parts.get("keymap", {}), "base")
+        self.write_remaps(parts.get("keymap_fn", {}), "fn")
+        done.append("remaps")
+        lighting = parts.get("lighting", {})
+        colors = parts.get("colors")
+        if lighting.get("custom") and colors:
+            self.set_key_colors({k: tuple(v) for k, v in colors.get("keys", {}).items()},
+                                default=tuple(colors.get("default", (0, 0, 0))),
+                                brightness=int(colors.get("brightness", lighting.get("brightness", 5))))
+            if not self.dry_run:  # keep the effect settings of the setup for the lighting page
+                _save_json(lighting_state_path(), lighting)
+            done.append("key colours")
+        elif lighting:
+            self.set_lighting(lighting.get("effect", "static"), tuple(lighting.get("color", (255, 255, 255))),
+                              int(lighting.get("brightness", 5)), int(lighting.get("speed", 3)),
+                              bool(lighting.get("rainbow", False)), lighting.get("direction", "right"))
+            if colors and not self.dry_run:
+                _save_json(colors_state_path(), colors)
+            done.append("lighting")
+        picture = parts.get("screen")
+        if include_screen and picture and Path(picture.get("path", "")).is_file():
+            self.upload_image(picture["path"], fit=picture.get("fit", "crop"), slot=int(picture.get("slot", 1)),
+                              progress=progress)
+            done.append("screen picture")
+        return done
 
     def _screen_pipe(self):
         """hidraw handle on the screen interface (0xFF68), which the kernel HID driver serves."""

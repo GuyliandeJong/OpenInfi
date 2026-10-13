@@ -174,19 +174,55 @@ def _royuan_mode(name: str) -> protocol.Mode:
 
 def _remap_hfd(args) -> int:
     board = _board(args)
+    layer = "fn" if args.fn else "base"
+    prefix = "Fn+" if args.fn else ""
     if args.list:
-        state = board.remaps()
-    elif args.reset:
-        board.reset_remaps()
+        any_remap = False
+        for name, tag in (("base", ""), ("fn", "Fn+")):
+            for key, target in sorted(board.remaps(name).items()):
+                print(f"{tag}{key} -> {target}")
+                any_remap = True
+        if not any_remap:
+            print("no remaps (all keys default)")
+        return 0
+    if args.reset:
+        board.reset_remaps(layer)
         state = {}
     else:
         if not args.key or not args.to:
-            raise ValueError("usage: infi75 remap KEY TARGET  (or --reset / --list)")
-        state = board.remap(args.key, args.to)
+            raise ValueError("usage: infi75 remap [--fn] KEY TARGET  (or --reset / --list)")
+        state = board.remap(args.key, args.to, layer)
     for name, target in sorted(state.items()):
-        print(f"{name} -> {target}")
+        print(f"{prefix}{name} -> {target}")
     if not state:
-        print("no remaps (all keys default)")
+        print(f"no {'Fn-layer ' if args.fn else ''}remaps (all keys default)")
+    return 0
+
+
+BLOCKABLE = {"alttab": "block_alt_tab", "altf4": "block_alt_f4", "win": "block_win"}
+
+
+def cmd_system(args) -> int:
+    board = _board(args)
+    changes = {}
+    if args.game_mode is not None:
+        changes["game_mode"] = args.game_mode == "on"
+    if args.block is not None:
+        wanted = {b.strip().lower().replace("+", "") for b in args.block.split(",") if b.strip()}
+        wanted.discard("none")
+        unknown = wanted - set(BLOCKABLE)
+        if unknown:
+            raise ValueError(f"unknown key(s) to block: {', '.join(sorted(unknown))}; use alttab, altf4, win or none")
+        changes.update({field: name in wanted for name, field in BLOCKABLE.items()})
+    if args.sleep is not None:
+        changes["sleep"] = args.sleep
+    settings = board.set_system(**changes) if changes else board.system()
+    blocked = [name for name, field in BLOCKABLE.items() if getattr(settings, field)]
+    print(f"game mode: {'on' if settings.game_mode else 'off'}")
+    print(f"blocked in game mode: {', '.join(blocked) or 'nothing'}")
+    print(f"sleep: {settings.sleep} (vendor setting 1-5)")
+    if not changes:
+        print("(last values written by this tool; the keyboard cannot be read back yet)")
     return 0
 
 
@@ -222,6 +258,28 @@ def cmd_screen(args) -> int:
         kb.upload_image(args.path, width, height)
     elif args.screen_cmd == "time":
         kb.sync_time(datetime.fromisoformat(args.at) if args.at else None)
+    return 0
+
+
+def cmd_setup(args) -> int:
+    board = _board(args)
+    if args.setup_cmd == "list":
+        names = board.setups()
+        for name in names:
+            saved = board.load_setup(name)
+            print(f"{name:24s} saved {saved.get('saved', '?')}  ({', '.join(saved.get('parts', {}))})")
+        if not names:
+            print("no saved setups ('infi75 setup save NAME' saves the current one)")
+    elif args.setup_cmd == "save":
+        path = board.save_setup(args.name)
+        print(f"saved setup '{args.name}' ({path})")
+    elif args.setup_cmd == "apply":
+        done = board.apply_setup(args.name, include_screen=not args.no_screen,
+                                 progress=lambda n, total: print(f"\rscreen {n}/{total}", end="", file=sys.stderr))
+        print(f"\napplied '{args.name}': {', '.join(done)}")
+    elif args.setup_cmd == "delete":
+        board.delete_setup(args.name)
+        print(f"deleted setup '{args.name}'")
     return 0
 
 
@@ -530,8 +588,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="target: key name (esc, f13, 0x29), combination (ctrl+c), media key "
                         "(volup, voldown, mute, playpause, next, prev, stop) or 'default'")
     p.add_argument("--reset", action="store_true", help="restore every key to its default")
-    p.add_argument("--list", action="store_true", help="show the remaps written by this tool")
+    p.add_argument("--list", action="store_true", help="show the remaps written by this tool (both layers)")
+    p.add_argument("--fn", action="store_true",
+                   help="the Fn layer: what the key does while Fn is held (INFI75; not Esc, F5, F6, "
+                        "Backspace, \\, Win, Fn)")
     p.set_defaults(func=cmd_remap)
+
+    p = sub.add_parser("system", help="game mode, key blocking and sleep timer (INFI75); no options: show")
+    p.add_argument("--game-mode", choices=["on", "off"])
+    p.add_argument("--block", metavar="KEYS",
+                   help="keys disabled in game mode, comma separated: alttab, altf4, win, or none")
+    p.add_argument("--sleep", type=int, choices=range(1, 6), metavar="1-5",
+                   help="sleep timer setting from the vendor driver's list (1-5, default 2; durations unconfirmed)")
+    p.set_defaults(func=cmd_system)
 
     scr = sub.add_parser("screen", help="built-in display")
     scr_sub = scr.add_subparsers(dest="screen_cmd", required=True)
@@ -544,6 +613,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = scr_sub.add_parser("time", help="sync the screen clock")
     p.add_argument("--at", help="ISO timestamp instead of now")
     scr.set_defaults(func=cmd_screen)
+
+    st = sub.add_parser("setup", help="saved setups: lighting, colours, remaps, game mode and screen together")
+    st_sub = st.add_subparsers(dest="setup_cmd", required=True)
+    st_sub.add_parser("list", help="list saved setups")
+    p = st_sub.add_parser("save", help="save what was last applied to the keyboard under a name")
+    p.add_argument("name")
+    p = st_sub.add_parser("apply", help="write a saved setup to the keyboard")
+    p.add_argument("name")
+    p.add_argument("--no-screen", action="store_true", help="leave the screen picture as it is")
+    p = st_sub.add_parser("delete", help="delete a saved setup")
+    p.add_argument("name")
+    st.set_defaults(func=cmd_setup)
 
     clk = sub.add_parser("clock", help="set the keyboard clock, once or automatically")
     clk_sub = clk.add_subparsers(dest="clock_cmd", required=True)

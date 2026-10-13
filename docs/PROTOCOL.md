@@ -189,8 +189,17 @@ in `src/infi75/profiles/infi75.json`):
 | 4 | LShift 73, Z-/ 74-83, RShift 84, Up 101 |
 | 5 | LCtrl 91, LWin 92, LAlt 93, Space 94, RAlt 95, Fn 96, Left 99, Down 100, Right 102 |
 
-`04 27` writes the Fn layer with the same layout (decoded, not
-implemented).
+### Fn layer (decoded, implemented, not yet confirmed on hardware)
+
+`04 27` writes what each key does while Fn is held. The vendor driver
+builds it in the same function shape as the base layer: `04 18`, `04 27`
+with byte 8 = `09`, the same 4-byte slot table with `aa 55` at 574-575
+(sent as 10 packets), `04 02`, `04 f0`. A zero entry keeps the key's
+built-in Fn function.
+
+`KeyboardLayout.xml` marks Esc, F5, F6, Backspace, `\|`, Win and Fn with
+`fnlayer_disable="1"`; the vendor UI does not let them be changed on the
+Fn layer, and `infi75` refuses them as well.
 
 ## 5. Per-key colours (confirmed)
 
@@ -213,7 +222,35 @@ slots equal the key slots of section 4.
 the vendor driver's **live preview**: the colours appear until the next
 effect change, then the stored table returns.
 
-## 6. Clock (confirmed)
+## 6. Game mode and sleep timer (decoded, not yet confirmed on hardware)
+
+`04 17` carries several unrelated settings in one data packet; the vendor
+driver always sends all of them together (`DeviceDriver.exe`, function at
+`0x436ce0`):
+
+```
+04 18                    START
+04 17 pp .. 01           SYSTEM, byte 2 = profile index (0), 1 data packet
+<data packet>
+04 02                    SAVE
+```
+
+| Offset | Field | Source in the vendor UI |
+|---|---|---|
+| 0 | `00` | |
+| 1 | game mode on | checkbox "gamemode" |
+| 2 | block Alt+Tab (only written when byte 1 = 1) | "disable_alttab" |
+| 3 | block Alt+F4 (only when byte 1 = 1) | "disable_altf4" |
+| 4 | block Win (only when byte 1 = 1) | "disable_win" |
+| 5 | 1 when the second of two layer buttons is selected | meaning unknown |
+| 6 | `sleep_light` value from the profile, default 0 | meaning unknown |
+| 8 | sleep time: combo box entries 1-5, default 2 | durations unknown |
+| 62-63 | `aa 55` | |
+
+The AK820 Pro uses byte 8 for 0 never, 1 one minute, 2 five minutes,
+3 thirty minutes; the INFI75 driver offers 1-5 instead.
+
+## 7. Clock (confirmed)
 
 ```
 04 18                    START
@@ -231,7 +268,7 @@ effect change, then the stored table returns.
 | 4-8 | month, day, hour, minute, second |
 | 62-63 | `aa 55` |
 
-## 7. Screen image (confirmed)
+## 8. Screen image (confirmed)
 
 The screen is 135 x 240 pixels (portrait). Frames are RGB565,
 little-endian, row-major from the top-left. Up to 141 frames form an
@@ -257,18 +294,16 @@ interface 3:  04 02                  SAVE
 
 A still image is 16 chunks; the 20-frame test GIF was 318 chunks.
 
-## 8. Not yet decoded or implemented
+## 9. Not yet decoded or implemented
 
 | Command | Seen in the driver | Status |
 |---|---|---|
-| `04 27` | Fn layer keymap | layout known, not implemented |
-| `04 17` | sleep timer (one data packet, `aa 55` at 62-63 on the AK820) | not tested |
 | `04 15` | unknown, with data | not decoded |
 | `04 19` | unknown | not decoded |
 | `04 f5` | read back state | not decoded |
 | macros | entry type `06` plus macro storage | not decoded |
 
-## 9. Firmware updaters (warning)
+## 10. Firmware updaters (warning)
 
 The vendor package ships two SONiX ISP updaters:
 

@@ -244,3 +244,42 @@ def test_board_saves_and_reloads_key_colours(tmp_path, monkeypatch):
     b = board_mod.InfiBoard(profiles.load())
     b.set_key_colors({"esc": (1, 2, 3)}, default=(0, 0, 9))
     assert b.saved_colors() == ({"ESC": (1, 2, 3)}, (0, 0, 9))
+
+
+def test_fn_layer_uses_command_27():
+    link = FakeLink()
+    hfd.Session(link, delay=0).write_keymap({2: hfd.key_entry("mute")}, hfd.FN_KEYMAP)
+    assert link.sent[1][:2] == b"\x04\x27" and link.sent[1][8] == 9
+    assert link.sent[2][8:12] == bytes([0x03, 0xE2, 0x00, 0x00])
+
+
+def test_system_packet_matches_vendor_driver():
+    data = hfd.system_data(hfd.System(game_mode=True, block_alt_tab=True, block_alt_f4=False, block_win=True,
+                                      sleep=3))
+    assert data[:9] == bytes([0, 1, 1, 0, 1, 0, 0, 0, 3])
+    assert data[62:] == b"\xaa\x55"
+    # blocking flags only count while game mode is on
+    assert hfd.system_data(hfd.System(block_win=True))[4] == 0
+    with pytest.raises(hfd.ProtocolError):
+        hfd.system_data(hfd.System(sleep=0))
+
+
+def test_board_layers_setups_and_reserved_fn_keys(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from infi75 import board as board_mod
+    from infi75 import profile
+
+    logs = []
+    b = board_mod.InfiBoard(profile.load(), dry_run=True, log=logs.append)
+    with pytest.raises(ValueError, match="reserved"):
+        b.write_remaps({"ESC": "a"}, "fn")
+    board_mod._save_json(board_mod.keymap_state_path("fn"), {"F1": "mute"})
+    board_mod._save_json(board_mod.lighting_state_path(), {"effect": "breath", "custom": False})
+    b.save_setup("Gaming Night")
+    assert b.setups() == ["Gaming Night"]
+    logs.clear()
+    assert b.apply_setup("gaming night") == ["remaps", "lighting"]
+    commands = [line.split("] ")[1][:5] for line in logs if line.startswith("[dry-run") and "] 04 " in line]
+    assert "04 11" in commands and "04 27" in commands and "04 13" in commands
+    b.delete_setup("Gaming Night")
+    assert b.setups() == []

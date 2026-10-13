@@ -20,6 +20,7 @@ class Key:
     x: float
     w: float = 1.0
     code: str = ""  # default HID usage, as in the vendor layout
+    fn: bool = True  # False: the firmware reserves Fn + this key (fnlayer_disable in the vendor layout)
 
 
 @dataclass

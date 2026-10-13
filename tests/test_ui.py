@@ -84,3 +84,28 @@ def test_describe_target():
     assert describe_target("ctrl+c") == "Ctrl + C"
     assert describe_target("volup") == "Volume up"
     assert describe_target("lctrl") == "Left Ctrl"
+
+
+def test_fn_layer_and_reserved_keys(app, window):
+    window.remap.layer_buttons["fn"].click()
+    window.remap.keyboard.set_selection(["ESC"])
+    assert not window.remap.capture.isEnabled()
+    assert "Reserved" in window.remap.key_state.text()
+    window.remap.keyboard.set_selection(["F1"])
+    window.remap._set_pending("mute")
+    window.remap._apply()
+    wait(app, window)
+    assert window.remap.layers["fn"] == {"F1": "mute"} and window.remap.layers["base"] == {}
+    assert "ok: Saving remaps" in window.device.log.toPlainText()
+
+
+def test_settings_page_sends_system_and_lists_setups(app, window):
+    window.settings.game_mode.setChecked(True)
+    window.settings.blocks["block_win"].setChecked(True)
+    window.settings._apply_system()
+    wait(app, window)
+    assert "ok: Applying game mode and sleep" in window.device.log.toPlainText()
+    assert not window.settings.load_button.isEnabled()
+    window.settings.set_setups(["Gaming", "Work"])
+    window.settings.setup_list.setCurrentRow(1)
+    assert window.settings.load_button.isEnabled()

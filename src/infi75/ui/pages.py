@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
+    QInputDialog,
+    QMessageBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -242,17 +245,7 @@ class LightingPage(Page):
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(500)
         self._debounce.timeout.connect(self._emit)
-        self._restoring = True
-        effect = saved.get("effect", "static")
-        effect = effect if effect in self.tiles else "static"
-        self.tiles[effect].setChecked(True)
-        self.picker.set_color(tuple(saved.get("color", (255, 255, 255))))
-        self.rainbow.setChecked(bool(saved.get("rainbow", False)))
-        self.brightness.setValue(int(saved.get("brightness", 5)))
-        self.speed.setValue(int(saved.get("speed", 3)))
-        self.dir_buttons.get(saved.get("direction", "right"), self.dir_buttons["right"]).setChecked(True)
-        self._restoring = False
-        self._sync_controls()
+        self.restore(saved)
 
         self.group.buttonClicked.connect(lambda _b: self._changed())
         self.picker.colorCommitted.connect(lambda _c: self._changed(prefer_color=True))
@@ -273,6 +266,20 @@ class LightingPage(Page):
         direction = next((n for n, b in self.dir_buttons.items() if b.isChecked()), "right")
         return {"effect": self.effect(), "color": self.picker.color(), "rainbow": self.rainbow.isChecked(),
                 "brightness": self.brightness.value(), "speed": self.speed.value(), "direction": direction}
+
+    def restore(self, saved: dict) -> None:
+        """Show *saved* settings without sending them."""
+        self._restoring = True
+        effect = saved.get("effect", "static")
+        effect = effect if effect in self.tiles else "static"
+        self.tiles[effect].setChecked(True)
+        self.picker.set_color(tuple(saved.get("color", (255, 255, 255))))
+        self.rainbow.setChecked(bool(saved.get("rainbow", False)))
+        self.brightness.setValue(int(saved.get("brightness", 5)))
+        self.speed.setValue(int(saved.get("speed", 3)))
+        self.dir_buttons.get(saved.get("direction", "right"), self.dir_buttons["right"]).setChecked(True)
+        self._restoring = False
+        self._sync_controls()
 
     def _sync_controls(self) -> None:
         label, desc, uses_color, uses_dir = EFFECT_INFO[self.effect()]
@@ -453,6 +460,11 @@ class ColoursPage(Page):
         self.saved = (dict(self.keyboard.colors), tuple(self.keyboard.default_color or (0, 0, 0)))
         self._refresh()
 
+    def load(self, colors: dict, default: tuple) -> None:
+        """Show colours that are already on the keyboard."""
+        self.keyboard.colors, self.keyboard.default_color = dict(colors), tuple(default)
+        self.applied()
+
     def dirty(self) -> bool:
         return (self.keyboard.colors, tuple(self.keyboard.default_color or (0, 0, 0))) != \
             (self.saved[0], tuple(self.saved[1]))
@@ -517,19 +529,38 @@ _KEY_TITLES = {"ESC": "Esc", "GRAVE": "`", "MINUS": "-", "EQUAL": "=", "BACKSPAC
 
 
 class RemapPage(Page):
-    remap_requested = Signal(dict)
+    remap_requested = Signal(str, dict)  # layer ("base" or "fn"), that layer's full state
 
-    def __init__(self, profile, remaps: dict) -> None:
+    def __init__(self, profile, remaps: dict, fn_remaps: dict | None = None) -> None:
         super().__init__("Remap keys", "Click a key on the keyboard, then press the key or combination it "
                                        "should produce.")
         self.profile = profile
-        self.remaps = dict(remaps)
+        self.layer = "base"
+        self.layers = {"base": dict(remaps), "fn": dict(fn_remaps or {})}
+        self.remaps = self.layers["base"]
         row = QHBoxLayout()
         row.setSpacing(16)
         self.body.addLayout(row, 1)
 
         left = QVBoxLayout()
         row.addLayout(left, 1)
+        layer_row = QHBoxLayout()
+        self.layer_group = QButtonGroup(self)
+        self.layer_buttons: dict[str, QPushButton] = {}
+        for key, text, tip in (("base", "Normal", "What each key does when pressed"),
+                               ("fn", "With Fn held", "What each key does while Fn is held")):
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            b.setCursor(Qt.PointingHandCursor)
+            self.layer_group.addButton(b)
+            self.layer_buttons[key] = b
+            layer_row.addWidget(b)
+        self.layer_buttons["base"].setChecked(True)
+        self.layer_hint = muted("", wrap=False)
+        layer_row.addWidget(self.layer_hint)
+        layer_row.addStretch(1)
+        left.addLayout(layer_row)
         self.keyboard = KeyboardView(profile, multi=False)
         left.addWidget(self.keyboard)
         active, active_layout = card("Active remaps")
@@ -586,8 +617,20 @@ class RemapPage(Page):
         self.restore_button.clicked.connect(self._restore)
         self.reset_button.clicked.connect(self._reset)
         self.active_list.itemClicked.connect(lambda item: self.keyboard.set_selection([item.data(Qt.UserRole)]))
-        self.set_remaps(self.remaps)
-        self._key_selected()
+        self.layer_group.buttonClicked.connect(self._layer_clicked)
+        self._show_layer()
+
+    def _layer_clicked(self, clicked) -> None:
+        self.layer = next(k for k, b in self.layer_buttons.items() if b is clicked)
+        self._show_layer()
+
+    def _reserved(self, name: str | None) -> bool:
+        if self.layer != "fn" or name is None:
+            return False
+        try:
+            return not self.profile.key(name).fn
+        except KeyError:
+            return False
 
     def _fill_targets(self, text: str) -> None:
         text = text.strip().lower()
@@ -608,21 +651,29 @@ class RemapPage(Page):
     def _selected_key(self) -> str | None:
         return next(iter(self.keyboard.selected), None)
 
+    def _key_title(self, name: str) -> str:
+        title = _KEY_TITLES.get(name, name)
+        return f"Fn + {title}" if self.layer == "fn" else f"{title} key"
+
     def _key_selected(self) -> None:
         name = self._selected_key()
-        has_key = name is not None
+        has_key = name is not None and not self._reserved(name)
         for w in (self.capture, self.search, self.targets):
             w.setEnabled(has_key)
         self.pending = None
         self.choice.setText("")
-        if not has_key:
+        if name is None:
             self.key_title.setText("No key selected")
             self.key_state.setText("Click a key on the keyboard.")
+        elif self._reserved(name):
+            self.key_title.setText(self._key_title(name))
+            self.key_state.setText("Reserved by the keyboard's own Fn functions; it cannot be changed.")
         else:
-            self.key_title.setText(f"{_KEY_TITLES.get(name, name)} key")
+            self.key_title.setText(self._key_title(name))
             current = self.remaps.get(name)
-            self.key_state.setText(f"Currently remapped to {describe_target(current)}." if current
-                                   else "Does its normal job.")
+            normal = "Does its built-in Fn function, if it has one." if self.layer == "fn" \
+                else "Does its normal job."
+            self.key_state.setText(f"Currently remapped to {describe_target(current)}." if current else normal)
         self._sync_buttons()
 
     def _set_pending(self, target: str) -> None:
@@ -635,7 +686,9 @@ class RemapPage(Page):
             self.pending = None
         else:
             self.pending = target
-            self.choice.setText(f"{self._selected_key()} → {describe_target(target)}")
+            name = self._selected_key()
+            label = f"Fn + {name}" if self.layer == "fn" else name
+            self.choice.setText(f"{label} → {describe_target(target)}")
         self._sync_buttons()
 
     def _sync_buttons(self) -> None:
@@ -649,29 +702,41 @@ class RemapPage(Page):
         if name and self.pending:
             state = dict(self.remaps)
             state[name] = self.pending
-            self.remap_requested.emit(state)
+            self.remap_requested.emit(self.layer, state)
 
     def _restore(self) -> None:
         name = self._selected_key()
         if name in self.remaps:
             state = dict(self.remaps)
             state.pop(name)
-            self.remap_requested.emit(state)
+            self.remap_requested.emit(self.layer, state)
 
     def _reset(self) -> None:
-        self.remap_requested.emit({})
+        self.remap_requested.emit(self.layer, {})
 
-    def set_remaps(self, remaps: dict) -> None:
-        self.remaps = dict(remaps)
+    def set_remaps(self, layer: str, remaps: dict) -> None:
+        self.layers[layer] = dict(remaps)
+        if layer == self.layer:
+            self._show_layer()
+
+    def _show_layer(self) -> None:
+        self.remaps = self.layers[self.layer]
+        fn = self.layer == "fn"
+        self.layer_hint.setText("Grey keys keep their built-in Fn function." if fn else "")
         self.keyboard.badges = {k: describe_target(v) for k, v in self.remaps.items()}
+        self.keyboard.disabled = {k.name for k in self.profile.keys if not k.fn} if fn else set()
         self.keyboard.update()
+        self.reset_button.setText("Restore all Fn keys" if fn else "Restore all keys")
         self.active_list.clear()
         for name, target in sorted(self.remaps.items()):
-            item = QListWidgetItem(f"{_KEY_TITLES.get(name, name)}  →  {describe_target(target)}")
+            title = _KEY_TITLES.get(name, name)
+            item = QListWidgetItem(f"{'Fn + ' if fn else ''}{title}  →  {describe_target(target)}")
             item.setData(Qt.UserRole, name)
             self.active_list.addItem(item)
         if not self.remaps:
-            item = QListWidgetItem("No remaps; every key does what its label says.")
+            text = "No Fn remaps; Fn combinations do their built-in functions." if fn \
+                else "No remaps; every key does what its label says."
+            item = QListWidgetItem(text)
             item.setFlags(Qt.NoItemFlags)
             self.active_list.addItem(item)
         self._key_selected()
@@ -878,6 +943,143 @@ class ScreenPage(Page):
 
     def upload_finished(self) -> None:
         self.progress.hide()
+
+
+# ------------------------------------------------------------------ settings
+
+SLEEP_LABELS = {1: "Setting 1 (shortest)", 2: "Setting 2 (vendor default)", 3: "Setting 3", 4: "Setting 4",
+                5: "Setting 5 (longest or never)"}
+
+
+class SettingsPage(Page):
+    system_requested = Signal(dict)
+    setup_save_requested = Signal(str)
+    setup_apply_requested = Signal(str, bool)
+    setup_delete_requested = Signal(str)
+
+    def __init__(self, system, names: list[str]) -> None:
+        super().__init__("Settings", "Game mode, sleep timer and saved setups.")
+        row = QHBoxLayout()
+        row.setSpacing(16)
+        self.body.addLayout(row, 1)
+
+        left = QVBoxLayout()
+        left.setSpacing(14)
+        row.addLayout(left, 1)
+        game, game_layout = card("Game mode")
+        game_layout.addWidget(muted("Disables keys that pull you out of a game. Takes effect while game mode "
+                                    "is on."))
+        self.game_mode = QCheckBox("Game mode on")
+        game_layout.addWidget(self.game_mode)
+        self.blocks = {}
+        for field, text in (("block_win", "Disable the Windows / Super key"),
+                            ("block_alt_tab", "Disable Alt + Tab"),
+                            ("block_alt_f4", "Disable Alt + F4")):
+            box = QCheckBox(text)
+            box.setContentsMargins(18, 0, 0, 0)
+            box.setStyleSheet("margin-left:22px;")
+            self.blocks[field] = box
+            game_layout.addWidget(box)
+        left.addWidget(game)
+
+        sleep, sleep_layout = card("Sleep")
+        sleep_layout.addWidget(muted("When the lights and screen switch off after you stop typing. The vendor "
+                                     "driver offers five steps; their durations are not documented yet."))
+        self.sleep = QComboBox()
+        for value, text in SLEEP_LABELS.items():
+            self.sleep.addItem(text, value)
+        sleep_layout.addWidget(self.sleep, 0, Qt.AlignLeft)
+        left.addWidget(sleep)
+        apply_row = QHBoxLayout()
+        apply_row.addStretch(1)
+        self.system_apply = button("Apply to keyboard", primary=True)
+        apply_row.addWidget(self.system_apply)
+        left.addLayout(apply_row)
+        left.addStretch(1)
+
+        setups, setups_layout = card("Saved setups")
+        setups.setFixedWidth(360)
+        setups_layout.addWidget(muted("A setup stores lighting, key colours, remaps (both layers), game mode, "
+                                      "sleep and the screen picture together."))
+        self.setup_list = QListWidget()
+        setups_layout.addWidget(self.setup_list, 1)
+        self.include_screen = QCheckBox("Also send the screen picture")
+        self.include_screen.setChecked(True)
+        setups_layout.addWidget(self.include_screen)
+        buttons = QHBoxLayout()
+        self.save_button = button("Save current...")
+        self.delete_button = button("Delete", danger=True)
+        self.load_button = button("Apply", primary=True)
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.delete_button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.load_button)
+        setups_layout.addLayout(buttons)
+        row.addWidget(setups)
+
+        self.set_system(system)
+        self.set_setups(names)
+        self.game_mode.toggled.connect(self._sync)
+        self.system_apply.clicked.connect(self._apply_system)
+        self.setup_list.currentItemChanged.connect(lambda *_: self._sync())
+        self.setup_list.itemDoubleClicked.connect(lambda _i: self._apply_setup())
+        self.save_button.clicked.connect(self._save_setup)
+        self.load_button.clicked.connect(self._apply_setup)
+        self.delete_button.clicked.connect(self._delete_setup)
+
+    def set_system(self, system) -> None:
+        self.game_mode.setChecked(system.game_mode)
+        for field, box in self.blocks.items():
+            box.setChecked(getattr(system, field))
+        self.sleep.setCurrentIndex(max(0, self.sleep.findData(system.sleep)))
+        self._sync()
+
+    def set_setups(self, names: list[str]) -> None:
+        current = self._selected_setup()
+        self.setup_list.clear()
+        for name in names:
+            self.setup_list.addItem(name)
+        if not names:
+            item = QListWidgetItem("No saved setups yet.")
+            item.setFlags(Qt.NoItemFlags)
+            self.setup_list.addItem(item)
+        matches = self.setup_list.findItems(current or "", Qt.MatchExactly) if current else []
+        if matches:
+            self.setup_list.setCurrentItem(matches[0])
+        self._sync()
+
+    def _selected_setup(self) -> str | None:
+        item = self.setup_list.currentItem()
+        return item.text() if item is not None and item.flags() & Qt.ItemIsSelectable else None
+
+    def _sync(self) -> None:
+        for box in self.blocks.values():
+            box.setEnabled(self.game_mode.isChecked())
+        chosen = self._selected_setup() is not None
+        self.load_button.setEnabled(chosen)
+        self.delete_button.setEnabled(chosen)
+
+    def _apply_system(self) -> None:
+        changes = {"game_mode": self.game_mode.isChecked(), "sleep": self.sleep.currentData()}
+        changes.update({field: box.isChecked() for field, box in self.blocks.items()})
+        self.system_requested.emit(changes)
+
+    def _save_setup(self) -> None:
+        name, ok = QInputDialog.getText(self, "Save setup", "Name for the current setup:",
+                                        text=self._selected_setup() or "")
+        if ok and name.strip():
+            self.setup_save_requested.emit(name.strip())
+
+    def _apply_setup(self) -> None:
+        name = self._selected_setup()
+        if name:
+            self.setup_apply_requested.emit(name, self.include_screen.isChecked())
+
+    def _delete_setup(self) -> None:
+        name = self._selected_setup()
+        if name and QMessageBox.question(self, "Delete setup", f"Delete the setup '{name}'?") \
+                == QMessageBox.Yes:
+            self.setup_delete_requested.emit(name)
 
 
 # -------------------------------------------------------------------- device

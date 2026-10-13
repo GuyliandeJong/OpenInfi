@@ -269,6 +269,7 @@ class KeyboardView(QWidget):
         self.colors: dict[str, tuple[int, int, int]] = {}
         self.default_color: tuple[int, int, int] | None = None
         self.badges: dict[str, str] = {}
+        self.disabled: set[str] = set()  # drawn faded; still selectable so the reason can be shown
         self.selected: set[str] = set()
         self.dim_unlit = False
         self._drag_start: QPointF | None = None
@@ -341,6 +342,8 @@ class KeyboardView(QWidget):
             p.drawRoundedRect(r, 7, 7)
             # legend
             text_color = readable_on(base) if lit else QColor("#c9ccd3")
+            if key.name in self.disabled:
+                text_color = QColor("#5a5e68")
             p.setPen(text_color)
             p.setFont(label_font)
             badge = self.badges.get(key.name)

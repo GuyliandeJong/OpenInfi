@@ -25,7 +25,7 @@ from .. import profile as profiles
 from ..board import InfiBoard
 from ..transport import DeviceError
 from . import theme
-from .pages import ColoursPage, DevicePage, LightingPage, RemapPage, ScreenPage
+from .pages import ColoursPage, DevicePage, LightingPage, RemapPage, ScreenPage, SettingsPage
 from .widgets import Toast, button
 
 
@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         side.addSpacing(14)
         self.nav = QListWidget()
         self.nav.setObjectName("Nav")
-        for name in ("Lighting", "Key colours", "Remap keys", "Screen", "Device"):
+        for name in ("Lighting", "Key colours", "Remap keys", "Screen", "Settings", "Device"):
             self.nav.addItem(QListWidgetItem(name))
         side.addWidget(self.nav, 1)
         self.sim_chip = QLabel("Simulation mode")
@@ -159,10 +159,11 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.lighting = LightingPage(board.saved_lighting())
         self.colours = ColoursPage(self.profile, colors, default)
-        self.remap = RemapPage(self.profile, board.remaps())
+        self.remap = RemapPage(self.profile, board.remaps("base"), board.remaps("fn"))
         self.screen = ScreenPage()
+        self.settings = SettingsPage(board.system(), board.setups())
         self.device = DevicePage(self.profile, self.simulate)
-        for page in (self.lighting, self.colours, self.remap, self.screen, self.device):
+        for page in (self.lighting, self.colours, self.remap, self.screen, self.settings, self.device):
             self.stack.addWidget(page)
         content.addWidget(self.stack, 1)
         holder = QWidget()
@@ -180,6 +181,10 @@ class MainWindow(QMainWindow):
         self.screen.sync_requested.connect(self.sync_clock)
         self.screen.set_auto_sync(clock.installed())
         self.screen.auto_sync_toggled.connect(self.set_auto_sync)
+        self.settings.system_requested.connect(self.apply_system)
+        self.settings.setup_save_requested.connect(self.save_setup)
+        self.settings.setup_apply_requested.connect(self.apply_setup)
+        self.settings.setup_delete_requested.connect(self.delete_setup)
         self.device.check_requested.connect(self.run_check)
         self.device.simulate_toggled.connect(self.set_simulate)
 
@@ -287,10 +292,42 @@ class MainWindow(QMainWindow):
         self.run("Applying key colours", lambda b: b.set_key_colors(colors, default=default, brightness=brightness),
                  done=lambda _r: self.colours.applied())
 
-    def apply_remaps(self, state: dict) -> None:
+    def apply_remaps(self, layer: str, state: dict) -> None:
         label = "Restoring all keys" if not state else "Saving remaps"
-        self.run(label, lambda b: (b.write_remaps(state), state)[1],
-                 done=self.remap.set_remaps)
+        self.run(label, lambda b: (b.write_remaps(state, layer), state)[1],
+                 done=lambda result: self.remap.set_remaps(layer, result))
+
+    def apply_system(self, changes: dict) -> None:
+        self.run("Applying game mode and sleep", lambda b: b.set_system(**changes), done=self.settings.set_system)
+
+    def save_setup(self, name: str) -> None:
+        try:
+            self._board().save_setup(name)
+        except (OSError, ValueError) as exc:
+            self.toast.show_message(f"Could not save: {exc}", "error", timeout_ms=7000)
+            return
+        self.settings.set_setups(self._board().setups())
+        self.toast.show_message(f"✓ Saved setup '{name}'", "ok")
+
+    def delete_setup(self, name: str) -> None:
+        try:
+            self._board().delete_setup(name)
+        except (OSError, ValueError) as exc:
+            self.toast.show_message(f"Could not delete: {exc}", "error", timeout_ms=7000)
+            return
+        self.settings.set_setups(self._board().setups())
+
+    def apply_setup(self, name: str, include_screen: bool) -> None:
+        def done(_result) -> None:
+            board = self._board()
+            self.lighting.restore(board.saved_lighting())
+            self.colours.load(*board.saved_colors())
+            self.remap.set_remaps("base", board.remaps("base"))
+            self.remap.set_remaps("fn", board.remaps("fn"))
+            self.settings.set_system(board.system())
+
+        self.run(f"Applying setup '{name}'",
+                 lambda b: b.apply_setup(name, include_screen, progress=self.bridge.progress.emit), done=done)
 
     def upload_image(self, path: str, fit: str) -> None:
         self.run("Sending picture", lambda b: b.upload_image(path, fit=fit, progress=self.bridge.progress.emit),
