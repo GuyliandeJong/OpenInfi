@@ -5,7 +5,7 @@ per-key colours, key remapping and the built-in screen, from a GUI or the
 command line. It works on keyboards that the official software cannot
 connect to.
 
-![Keys tab](docs/images/gui-keys.png)
+![Key colours](docs/images/ui-colours.png)
 
 ## Features
 
@@ -25,9 +25,10 @@ after unplugging.
 ## Requirements
 
 - Linux (tested on CachyOS). Other systems are untested.
-- Python 3.10 or newer, libusb 1.0 and Tk:
-  - Arch / CachyOS: `sudo pacman -S --needed python libusb tk`
-  - Debian / Ubuntu: `sudo apt install python3-venv libusb-1.0-0 python3-tk`
+- Python 3.10 or newer and libusb 1.0:
+  - Arch / CachyOS: `sudo pacman -S --needed python libusb`
+  - Debian / Ubuntu: `sudo apt install python3-venv libusb-1.0-0`
+- For the graphical app: Qt for Python (PySide6), installed by `pip install '.[gui]'` below.
 - The keyboard connected **by USB cable, in wired mode**. Configuration does
   not work over Bluetooth (see below).
 
@@ -38,7 +39,7 @@ git clone https://github.com/GuyliandeJong/Infi75.git
 cd Infi75
 python -m venv .venv
 source .venv/bin/activate          # fish: source .venv/bin/activate.fish
-pip install .
+pip install '.[gui]'               # or: pip install .   (command line only)
 ```
 
 Give your user access to the keyboard (once), then unplug and replug it:
@@ -62,20 +63,25 @@ The output should list a collection with `usage_page=0xff13`.
 infi75 gui
 ```
 
-The header shows whether the keyboard is reachable: connected by USB,
-connected by Bluetooth only (cannot be configured), or not found.
+The sidebar shows whether the keyboard is connected. If it is not reachable,
+a banner explains what to do (connect the cable, switch to wired mode, or
+install the permission rule).
 
-| Tab | Use |
+| Page | What it does |
 |---|---|
-| **Lighting** | Pick an effect from the list (each has a short description), a colour or rainbow, brightness, speed and direction, then **Apply lighting**. With **Apply on change** every adjustment is sent immediately. |
-| **Keys** | The keyboard is drawn in its current colours. Click a key, Shift-click to add keys, or drag to select a group. Click a palette colour to paint the selection, choose a colour for all other keys, then **Apply colours**. To remap, select one key, choose a target and press **Remap selected key**; remapped keys show their new function on the drawing. |
-| **Display** | Choose an image or GIF; the preview shows exactly what the screen will display for the chosen fit. **Upload to keyboard** shows progress. **Sync clock** sets the screen clock. |
+| **Lighting** | Effect tiles grouped as static, animated and reactive, each with a short description. Pick a colour on the colour wheel or a swatch, rainbow, brightness, speed and direction; controls an effect does not use are disabled. Changes are sent automatically after a short pause (sliders when released), so dragging does not cause dozens of writes. |
+| **Key colours** | The keyboard drawn in its colours. Click a key, Shift-click to add, drag to select a group, or use the quick selections (letters, F-row, WASD, arrows). With keys selected, a colour click paints them. Presets: rainbow, gaming, rows, single colour, all off. Nothing is sent until **Apply to keyboard**; **Revert** undoes edits. |
+| **Remap keys** | Click a key, then press **Press to record a key** and press the key or combination it should produce (for example Ctrl+C), or choose from the searchable list including media keys. Remapped keys carry a badge; **Restore default** and **Restore all keys** undo. |
+| **Screen** | Drop an image or GIF (or browse). The preview shows exactly what the screen will display, animated for GIFs, for each fit: fill, fit with black bars, or stretch. **Send to keyboard** shows progress. The clock card syncs the keyboard clock. |
+| **Device** | Connection, firmware and a read-only check of both keyboard channels and the permission rule, the permission command with a copy button, simulation mode (shows the data, sends nothing) and the activity log. |
 
-Tick **Dry run** to see the packets in the log without sending anything.
-
-| Lighting | Display |
+| Lighting | Remap keys |
 |---|---|
-| ![Lighting tab](docs/images/gui-lighting.png) | ![Display tab](docs/images/gui-display.png) |
+| ![Lighting](docs/images/ui-lighting.png) | ![Remap keys](docs/images/ui-remap.png) |
+
+| Screen | Device |
+|---|---|
+| ![Screen](docs/images/ui-screen.png) | ![Device](docs/images/ui-device.png) |
 
 ## Command line
 
@@ -109,8 +115,9 @@ or `r,g,b`.
 
 The keyboard replaces its whole remap table on every write, so the tool
 keeps your remaps in `~/.config/infi75/keymap.json` and sends all of them
-each time. The GUI also remembers the last applied key colours in
-`~/.config/infi75/colors.json`.
+each time. The app also remembers the last applied lighting
+(`lighting.json`) and key colours (`colors.json`) in the same folder, so it
+opens showing what is on the keyboard.
 
 ## Why the official software does not work
 
@@ -134,6 +141,7 @@ The full protocol is documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 | `Keyboard not found` / `not found` errors | Cable connected? Keyboard switched to wired mode? Run `lsusb` and look for `05ac:024f`. |
 | `Access denied`, `open failed`, `cannot claim interface` | Install the udev rule (see Install) and replug the keyboard. |
 | GUI says "Bluetooth only" | Connect the cable and switch the keyboard to wired mode. |
+| `the GUI needs PySide6` | `pip install '.[gui]'` in the project folder, or `sudo pacman -S pyside6`. |
 | `warning: no confirmation for 04 02` | The keyboard was still saving; the setting is normally applied anyway. |
 | Per-key colours flash and then revert | Update to the current version; old versions used the preview command. |
 
@@ -149,7 +157,8 @@ pytest
 | `hfd.py` | INFI75 packet builders and session (acknowledgement handling) |
 | `board.py` | INFI75 operations shared by the CLI and the GUI |
 | `usbctl.py` | libusb control transfers for the unbound configuration interface |
-| `gui.py`, `cli.py` | user interfaces |
+| `ui/` | graphical app (PySide6): `app.py` window and background work, `pages.py`, `widgets.py` (colour picker, keyboard view, key capture), `theme.py` |
+| `cli.py`, `gui.py` | command line; GUI entry point |
 | `screen.py` | image and GIF conversion to RGB565 |
 | `probe.py` | read-only interface and descriptor probing |
 | `capture.py` | pcap/pcapng (USBPcap, usbmon) parsing, diff and replay for protocol work |
