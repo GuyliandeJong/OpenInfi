@@ -59,6 +59,7 @@ def test_udev_rule_is_scoped_to_product():
     assert 'ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f"' in rule
     assert rule.count('SUBSYSTEM=="hidraw"') == 1
     assert 'SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", ATTR{idProduct}=="024f"' in rule
+    assert 'KERNELS=="0005:05AC:024F.*"' in rule
 
 
 class _FakeHid:

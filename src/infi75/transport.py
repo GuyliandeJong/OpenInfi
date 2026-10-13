@@ -173,4 +173,8 @@ def udev_rule(vendor_id: int, product_ids: list[int] | None = None) -> str:
         # libusb access for interfaces the HID driver leaves unbound
         lines.append(f'SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", {match.replace("ATTRS", "ATTR")}, '
                      'MODE="0660", TAG+="uaccess"')
+        if pid is not None:
+            # Bluetooth HID (bus 0005) has no USB attributes; match the HID device name
+            lines.append(f'SUBSYSTEM=="hidraw", KERNELS=="0005:{vendor_id:04X}:{pid:04X}.*", '
+                         'MODE="0660", TAG+="uaccess"')
     return "\n".join(lines) + "\n"
