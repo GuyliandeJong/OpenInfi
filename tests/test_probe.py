@@ -58,3 +58,34 @@ def test_udev_rule_is_scoped_to_product():
     rule = udev_rule(0x05AC, [0x024F])
     assert 'ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f"' in rule
     assert rule.count("SUBSYSTEM") == 1
+
+
+class _FakeHid:
+    def __init__(self, fail_reads=False):
+        self.sent, self.fail_reads = [], fail_reads
+
+    def device(self):
+        return self
+
+    def open_path(self, path):
+        pass
+
+    def close(self):
+        pass
+
+    def send_feature_report(self, data):
+        self.sent.append(bytes(data))
+        return len(data)
+
+    def get_feature_report(self, rid, size):
+        if self.fail_reads:
+            raise OSError("read error")
+        return [0, 0x04, 0x18] + [0] * 62
+
+
+def test_handshake_sends_only_start_and_end():
+    fake = _FakeHid()
+    assert probe.handshake(fake, b"/dev/x", lambda m: None) is True
+    assert [p[:3] for p in fake.sent] == [b"\x00\x04\x18", b"\x00\x04\x02"]
+    assert all(len(p) == 65 and not any(p[3:]) for p in fake.sent)
+    assert probe.handshake(_FakeHid(fail_reads=True), b"/dev/x", lambda m: None) is False

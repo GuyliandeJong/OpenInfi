@@ -245,6 +245,16 @@ def cmd_probe(args) -> int:
         return 0
 
     nodes = [n for pid in pids for n in probe.linux_nodes(vid, pid)] if pids else []
+    if args.handshake:
+        targets = [n for n in nodes if n.interface == args.interface]
+        if not targets:
+            print(f"no hidraw node for interface {args.interface}")
+            return 1
+        node = targets[0]
+        print(f"{node.path}  interface {node.interface}: sending session start/end (04 18, 04 02)")
+        ok = probe.handshake(hid, node.path.encode(), log)
+        print("result: " + ("keyboard answered feature reports" if ok else "no feature-report reply"))
+        return 0
     if not nodes:
         print(f"no hidraw nodes for {vid:04x}:{','.join(f'{p:04x}' for p in pids) or '*'}; "
               "is the keyboard connected by cable in wired mode?")
@@ -378,6 +388,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("probe", help="identify the keyboard's protocol (read-only)")
     p.add_argument("--online", action="store_true",
                    help="also send GET_DEVICE_INFO in the AJAZZ/HFD online framing (a 4096-byte output report)")
+    p.add_argument("--handshake", action="store_true",
+                   help="WRITE TEST: send the vendor driver's session start/end feature reports (04 18, 04 02)")
+    p.add_argument("--interface", type=int, default=1, help="interface for --handshake (default 1)")
     p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("udev", help="print a Linux udev rule for non-root access")

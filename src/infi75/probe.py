@@ -192,3 +192,34 @@ def read_features(hid_module, path: bytes, report_ids: list[int], log) -> None:
                 log(f"  GET_FEATURE id={rid}: {exc}")
     finally:
         device.close()
+
+
+def handshake(hid_module, path: bytes, log) -> bool:
+    """Send the vendor driver's session start (04 18) and end (04 02) commands.
+
+    These are the first and last feature reports the INFI75 Driver V1.1
+    sends around every operation; they carry no settings. Returns True if
+    the keyboard accepted the writes and answered at least one read.
+    """
+    device = hid_module.device()
+    device.open_path(path)
+    answered = False
+    try:
+        for name, cmd in (("start", 0x18), ("end", 0x02)):
+            report = bytes([0x00, 0x04, cmd]) + bytes(62)
+            try:
+                written = device.send_feature_report(report)
+                log(f"  SET_FEATURE 04 {cmd:02x} ({name}): {written} bytes")
+            except (OSError, ValueError) as exc:
+                log(f"  SET_FEATURE 04 {cmd:02x} ({name}): {exc}")
+                continue
+            time.sleep(0.01)
+            try:
+                data = bytes(device.get_feature_report(0, 65))
+                log(f"  GET_FEATURE: {data[:24].hex(' ')}{' ...' if len(data) > 24 else ''}")
+                answered = True
+            except (OSError, ValueError) as exc:
+                log(f"  GET_FEATURE: {exc}")
+    finally:
+        device.close()
+    return answered
