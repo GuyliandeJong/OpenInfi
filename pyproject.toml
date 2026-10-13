@@ -26,7 +26,7 @@ infi75 = "infi75.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-infi75 = ["profiles/*.json"]
+infi75 = ["profiles/*.json", "data/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

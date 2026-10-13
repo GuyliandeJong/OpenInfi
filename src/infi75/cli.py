@@ -461,6 +461,18 @@ def cmd_udev(args) -> int:
     return 0
 
 
+def cmd_desktop(args) -> int:
+    from . import desktop
+
+    if args.desktop_cmd == "install":
+        entry = desktop.install()
+        print(f"added 'INFI75 Configurator' to the app menu ({entry})")
+    else:
+        desktop.uninstall()
+        print("removed 'INFI75 Configurator' from the app menu")
+    return 0
+
+
 def cmd_gui(args) -> int:
     from .gui import run
 
@@ -582,6 +594,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("udev", help="print a Linux udev rule for non-root access")
     p.set_defaults(func=cmd_udev)
+
+    p = sub.add_parser("desktop", help="add or remove the app-menu entry for the graphical configurator")
+    p.add_argument("desktop_cmd", choices=["install", "uninstall"])
+    p.set_defaults(func=cmd_desktop)
 
     p = sub.add_parser("gui", help="open the graphical configurator")
     p.set_defaults(func=cmd_gui)

@@ -6,7 +6,7 @@ import sys
 import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import clock
+from .. import clock, desktop
 from .. import profile as profiles
 from ..board import InfiBoard
 from ..transport import DeviceError
@@ -325,6 +325,8 @@ class MainWindow(QMainWindow):
 def run(args) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("INFI75 Configurator")
+    app.setDesktopFileName("infi75")  # matches infi75.desktop, so the task bar shows its icon
+    app.setWindowIcon(QIcon(str(desktop.icon_source())))
     app.setStyle("Fusion")
     app.setStyleSheet(theme.STYLE)
     window = MainWindow(args)

@@ -34,6 +34,23 @@ after unplugging.
 
 ## Install
 
+### Arch / CachyOS package (recommended)
+
+```console
+git clone https://github.com/GuyliandeJong/Infi75.git
+cd Infi75/packaging/arch
+makepkg -si
+sudo pacman -S --needed pyside6                       # for the graphical app
+systemctl --user enable --now infi75-clock.timer      # optional: automatic clock sync
+```
+
+The package installs the `infi75` command, the app-menu entry
+"INFI75 Configurator", the permission rule (including the plug-in clock
+sync) and the clock units. Replug the keyboard once afterwards. Update with
+`git pull` and `makepkg -si` again.
+
+### Python virtual environment (any distribution)
+
 ```console
 git clone https://github.com/GuyliandeJong/Infi75.git
 cd Infi75
@@ -56,6 +73,12 @@ infi75 probe --usb 3
 ```
 
 The output should list a collection with `usage_page=0xff13`.
+
+Add the app to the application menu (optional):
+
+```console
+infi75 desktop install          # remove with: infi75 desktop uninstall
+```
 
 ## Graphical configurator
 
