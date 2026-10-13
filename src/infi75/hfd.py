@@ -31,6 +31,18 @@ SAVE = 0x02
 FINISH = 0xF0
 MODE = 0x13
 TIME = 0x28
+KEYMAP = 0x11  # base layer
+
+KEYMAP_PACKETS = 9  # announced in the KEYMAP header
+KEYMAP_SENT = 10  # the vendor driver sends 0x2b6 >> 6 = 10 packets
+KEYMAP_SLOTS = KEYMAP_PACKETS * PACKET // 4  # 144 four-byte entries
+
+# Consumer-page usages the vendor driver offers for media keys.
+MEDIA = {
+    "playpause": 0xCD, "stop": 0xB7, "prev": 0xB6, "next": 0xB5,
+    "volup": 0xE9, "voldown": 0xEA, "mute": 0xE2,
+}
+MODIFIER_BITS = {0xE0 + i: 1 << i for i in range(8)}
 
 # Effect numbers, named after gohv/EPOMAKER-Ajazz-AK820-Pro and checked on
 # an INFI75-1.2 (descriptions are what that keyboard showed).
@@ -128,6 +140,47 @@ def time_data(when: datetime, profile: int = 0) -> bytes:
     return bytes(packet)
 
 
+def key_entry(target: str) -> bytes:
+    """Encode a remap target as the firmware's 4-byte key action.
+
+    Keyboard keys: [02, modifier bits, HID usage, 00], e.g. "ctrl+c".
+    A modifier on its own: [02, bit, 00, 00]. Media keys: [03, usage lo, usage hi, 00].
+    "default" gives 00 00 00 00, which keeps the key's built-in function.
+    """
+    from . import hidkeys
+
+    spec = target.strip().lower()
+    if spec in ("default", "reset"):
+        return bytes(4)
+    if spec in MEDIA:
+        usage = MEDIA[spec]
+        return bytes((0x03, usage & 0xFF, usage >> 8, 0))
+    parts = [p for p in spec.split("+") if p]
+    if not parts:
+        raise ProtocolError("empty remap target")
+    codes = [hidkeys.code(p) for p in parts]
+    mods = 0
+    for c in codes[:-1]:
+        if c not in MODIFIER_BITS:
+            raise ProtocolError(f"{target!r}: only the last part of a combination may be a non-modifier key")
+        mods |= MODIFIER_BITS[c]
+    last = codes[-1]
+    if last in MODIFIER_BITS:
+        return bytes((0x02, mods | MODIFIER_BITS[last], 0, 0))
+    return bytes((0x02, mods, last, 0))
+
+
+def keymap_payload(entries: dict[int, bytes]) -> bytes:
+    """Base-layer table: 4 bytes per key slot, zero = keep default."""
+    buf = bytearray(KEYMAP_SENT * PACKET)
+    for slot, entry in entries.items():
+        if not 0 < slot < KEYMAP_SLOTS or len(entry) != 4:
+            raise ProtocolError(f"invalid key slot {slot}")
+        buf[slot * 4 : slot * 4 + 4] = entry
+    buf[KEYMAP_PACKETS * PACKET - 2 : KEYMAP_PACKETS * PACKET] = b"\xaa\x55"
+    return bytes(buf)
+
+
 class Session:
     """Sends packets with the vendor driver's pacing and acknowledgement checks."""
 
@@ -170,6 +223,16 @@ class Session:
         self.send(command(START))
         self.send(command(MODE, byte8=1))
         self.send(lighting_data(settings), ack=False)
+        self.send(command(SAVE))
+        self.send(command(FINISH))
+
+    def write_keymap(self, entries: dict[int, bytes]) -> None:
+        """Replace the base-layer remaps; slots not in *entries* return to default."""
+        payload = keymap_payload(entries)
+        self.send(command(START))
+        self.send(command(KEYMAP, byte8=KEYMAP_PACKETS))
+        for offset in range(0, len(payload), PACKET):
+            self.send(payload[offset : offset + PACKET], ack=False)
         self.send(command(SAVE))
         self.send(command(FINISH))
 

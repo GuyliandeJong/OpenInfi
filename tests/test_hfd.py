@@ -98,3 +98,53 @@ def test_off_is_single_on_at_zero_brightness(capsys):
     data = [l for l in capsys.readouterr().err.splitlines() if l.startswith("[dry-run")][2]
     packet = bytes.fromhex(data.split("] ")[1])
     assert packet[0] == 0x02 and packet[9] == 0
+
+
+def test_key_entry_encodings():
+    assert hfd.key_entry("esc") == bytes([0x02, 0x00, 0x29, 0x00])
+    assert hfd.key_entry("ctrl+c") == bytes([0x02, 0x01, 0x06, 0x00])
+    assert hfd.key_entry("lctrl") == bytes([0x02, 0x01, 0x00, 0x00])
+    assert hfd.key_entry("shift+alt") == bytes([0x02, 0x02 | 0x04, 0x00, 0x00])
+    assert hfd.key_entry("volup") == bytes([0x03, 0xE9, 0x00, 0x00])
+    assert hfd.key_entry("default") == bytes(4)
+    with pytest.raises(hfd.ProtocolError):
+        hfd.key_entry("a+b")
+
+
+def test_keymap_payload_layout():
+    payload = hfd.keymap_payload({55: hfd.key_entry("lctrl")})
+    assert len(payload) == 640
+    assert payload[55 * 4 : 55 * 4 + 4] == bytes([0x02, 0x01, 0x00, 0x00])
+    assert payload[574:576] == b"\xaa\x55"
+    assert not any(payload[:55 * 4]) and not any(payload[576:])
+
+
+def test_write_keymap_transaction():
+    link = FakeLink()
+    hfd.Session(link, delay=0).write_keymap({55: hfd.key_entry("esc")})
+    heads = [p[:2].hex() for p in link.sent]
+    assert heads[:2] == ["0418", "0411"] and link.sent[1][8] == 9
+    assert len(link.sent) == 2 + 10 + 2 and heads[-2:] == ["0402", "04f0"]
+
+
+def test_remap_cli_accumulates_and_resets(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    class Link(FakeLink):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            pass
+
+    link = Link()
+    monkeypatch.setattr("infi75.usbctl.UsbHid", lambda *a, **k: link)
+    assert cli.main(["remap", "CAPS", "lctrl"]) == 0
+    assert cli.main(["remap", "F12", "volup"]) == 0
+    table = b"".join(p for p in link.sent[-12:-2])
+    assert table[55 * 4 : 55 * 4 + 4] == bytes([0x02, 0x01, 0, 0])
+    assert table[13 * 4 : 13 * 4 + 4] == bytes([0x03, 0xE9, 0, 0])
+    assert cli.main(["remap", "--reset"]) == 0
+    table = b"".join(p for p in link.sent[-12:-2])
+    assert not any(table[:574])
+    assert (tmp_path / "infi75" / "keymap.json").read_text().strip() == "{}"

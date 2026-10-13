@@ -19,6 +19,7 @@ class Key:
     row: int
     x: float
     w: float = 1.0
+    code: str = ""  # default HID usage, as in the vendor layout
 
 
 @dataclass

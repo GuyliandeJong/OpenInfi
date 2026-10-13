@@ -45,7 +45,7 @@ def test_rgb_keys_and_remap_dry_run(run):
     code, out = run("rgb", "keys", "ESC=red", "#41=0,0,255")
     assert code == 0 and out.err.count("[dry-run") == 8
     code, out = run("remap", "CAPS", "lctrl")
-    assert code == 0 and "13 00 03 00 00 00 00 e9 00 00 e0" in out.err
+    assert code == 0 and "13 00 37 00 00 00 00 b5 00 00 e0" in out.err
 
 
 def test_screen_image_requires_size(run, tmp_path):

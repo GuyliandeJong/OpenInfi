@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import Counter
 from datetime import datetime
@@ -189,9 +190,58 @@ def _royuan_mode(name: str) -> protocol.Mode:
         raise ValueError(f"unknown effect {name!r}; known: {', '.join(m.name.lower() for m in protocol.Mode)}") from None
 
 
+def _keymap_state_path():
+    import os
+    from pathlib import Path
+
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / "infi75" / "keymap.json"
+
+
+def _remap_hfd(args) -> int:
+    """Remaps accumulate in a state file because each write replaces the whole table."""
+    from . import hfd
+
+    prof = profiles.load(args.profile)
+    path = _keymap_state_path()
+    try:
+        state: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
+    except (OSError, ValueError):
+        state = {}
+    if args.list:
+        for name, target in sorted(state.items()):
+            print(f"{name} -> {target}")
+        if not state:
+            print("no remaps (all keys default)")
+        return 0
+    if args.reset:
+        state = {}
+    else:
+        if not args.key or not args.to:
+            raise ValueError("usage: infi75 remap KEY TARGET  (or --reset / --list)")
+        key = prof.key(args.key)
+        hfd.key_entry(args.to)  # validate before storing
+        if args.to.strip().lower() in ("default", "reset"):
+            state.pop(key.name, None)
+        else:
+            state[key.name] = args.to
+    entries = {prof.key(name).index: hfd.key_entry(target) for name, target in state.items()}
+    _run_hfd(args, lambda s: s.write_keymap(entries))
+    if not args.dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, indent=2, sort_keys=True))
+    for name, target in sorted(state.items()):
+        print(f"{name} -> {target}", file=sys.stderr)
+    if not state:
+        print("all keys restored to default", file=sys.stderr)
+    return 0
+
+
 def cmd_remap(args) -> int:
     if _is_hfd(args):
-        raise DeviceError("key remapping is not implemented for this keyboard yet")
+        return _remap_hfd(args)
+    if not args.key or not args.to:
+        raise ValueError("usage: infi75 remap KEY TARGET")
     kb = _keyboard(args)
     hid_code = hidkeys.code(args.to)
     kb.remap(args.key, hid_code)
@@ -463,8 +513,12 @@ def build_parser() -> argparse.ArgumentParser:
     rgb.set_defaults(func=cmd_rgb)
 
     p = sub.add_parser("remap", help="make a key send a different key code")
-    p.add_argument("key", help="physical key (profile name, or #index)")
-    p.add_argument("to", help="target key name, e.g. esc, f13, volup, 0x29")
+    p.add_argument("key", nargs="?", help="physical key (profile name, or #index); 'infi75 keys' lists them")
+    p.add_argument("to", nargs="?",
+                   help="target: key name (esc, f13, 0x29), combination (ctrl+c), media key "
+                        "(volup, voldown, mute, playpause, next, prev, stop) or 'default'")
+    p.add_argument("--reset", action="store_true", help="restore every key to its default")
+    p.add_argument("--list", action="store_true", help="show the remaps written by this tool")
     p.set_defaults(func=cmd_remap)
 
     scr = sub.add_parser("screen", help="built-in display")
@@ -520,6 +574,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
+    except BrokenPipeError:  # output piped into e.g. head
+        return 0
     except (DeviceError, capture.CaptureError, KeyError, ValueError, OSError, RuntimeError) as exc:
         message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         print(f"error: {message}", file=sys.stderr)
