@@ -109,6 +109,26 @@ def command(cmd: int, byte2: int = 0, byte8: int = 0) -> bytes:
     return bytes(packet)
 
 
+COMMAND_NAMES = {START: "start", SAVE: "save", FINISH: "finish", MODE: "lighting", TIME: "clock",
+                 KEYMAP: "keymap", FN_KEYMAP: "Fn keymap", SYSTEM: "game mode/sleep", MACRO_BEGIN: "macro begin",
+                 MACROS: "macros", KEY_COLORS_PREVIEW: "key colour preview", KEY_COLORS: "key colours",
+                 SCREEN: "screen", 0xF5: "read state"}
+
+
+def describe(packet: bytes) -> str:
+    """Short description of a captured configuration packet, for 'infi75 capture analyze'."""
+    if not packet:
+        return "empty"
+    if packet[0] == 0x04 and len(packet) > 1:
+        name = COMMAND_NAMES.get(packet[1], f"command 0x{packet[1]:02x}")
+        extra = f", {packet[8]} data packet(s)" if len(packet) > 8 and packet[8] else ""
+        status = f", status {packet[3]:02x}" if len(packet) > 3 and packet[3] else ""
+        return f"{name}{extra}{status}"
+    if len(packet) >= 16 and packet[14:16] == b"\xaa\x55":
+        return f"lighting data: effect 0x{packet[0]:02x} rgb=({packet[1]},{packet[2]},{packet[3]})"
+    return "data"
+
+
 def resolve_mode(name_or_number: str) -> int:
     key = name_or_number.strip().lower()
     if key in MODES:

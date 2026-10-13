@@ -242,7 +242,8 @@ pytest
 | `probe.py` | read-only interface and descriptor probing |
 | `capture.py` | pcap/pcapng (USBPcap, usbmon) parsing, diff and replay for protocol work |
 | `profile.py`, `profiles/infi75.json` | key layout, slots and USB identity |
-| `protocol.py`, `transport.py`, `device.py` | Royuan protocol for older Epomaker boards (VID `0x3151`, e.g. RT100), selected by a profile with `"protocol": "royuan"` |
+| `transport.py` | HID device discovery and the udev rule |
+| `macro.py`, `clock.py`, `desktop.py` | macro text form; automatic clock sync units; app-menu entry |
 
 ## Safety
 

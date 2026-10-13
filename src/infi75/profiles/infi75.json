@@ -1,6 +1,5 @@
 {
   "name": "Infiverse INFI75 (ANSI)",
-  "verified": false,
   "protocol": "hfd",
   "notes": "USB ID 05ac:024f, SONiX SN32F290 (HFD RKGK890). Configuration uses 64-byte feature reports on interface 3 (usage page 0xFF13), reached through libusb because the firmware declares that interface without an IN endpoint. Key slots and default codes come from the vendor driver's KeyboardLayout.xml.",
   "usb": {
@@ -9,17 +8,7 @@
       "0x024f"
     ],
     "lighting_interface": 3,
-    "screen_interface": 2,
-    "report_type": "feature"
-  },
-  "packet_size": 64,
-  "pacing_ms": 10,
-  "erase_delay_ms": 250,
-  "rgb_slots": 130,
-  "screen": {
-    "width": null,
-    "height": null,
-    "transpose": true
+    "screen_interface": 2
   },
   "keys": [
     {"name": "ESC", "index": 1, "row": 0, "x": 0.0, "w": 1.0, "code": "0x29", "fn": false},

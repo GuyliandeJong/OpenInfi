@@ -219,6 +219,14 @@ class InfiBoard:
     def reset_remaps(self, layer: str = "base") -> None:
         self.write_remaps({}, layer)
 
+    def replay(self, packets: list[bytes]) -> int:
+        """Send raw 64-byte configuration packets, e.g. from a capture of the vendor driver."""
+        for packet in packets:
+            if len(packet) != hfd.PACKET:
+                raise ValueError(f"packets must be {hfd.PACKET} bytes")
+        self._run(lambda s: [s.send(p, ack=p[0] == 0x04) for p in packets])
+        return len(packets)
+
     # -------------------------------------------------------------- macros
 
     @staticmethod

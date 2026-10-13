@@ -8,10 +8,9 @@ import time
 from collections import Counter
 from datetime import datetime
 
-from . import __version__, capture, hidkeys, protocol
+from . import __version__, capture, hfd, hidkeys
 from . import profile as profiles
-from .device import Keyboard
-from .transport import DeviceError, Transport, enumerate_interfaces, udev_rule
+from .transport import DeviceError, enumerate_interfaces, udev_rule
 
 COLOR_NAMES = {
     "red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255), "white": (255, 255, 255),
@@ -37,29 +36,8 @@ def parse_color(text: str) -> tuple[int, int, int]:
     return parts  # type: ignore[return-value]
 
 
-def parse_size(text: str) -> tuple[int, int]:
-    try:
-        w, h = (int(v) for v in text.lower().split("x"))
-    except ValueError:
-        raise argparse.ArgumentTypeError("size must look like 240x135") from None
-    return w, h
-
-
 def _int(text: str) -> int:
     return int(text, 0)
-
-
-def _keyboard(args) -> Keyboard:
-    prof = profiles.load(args.profile)
-    if args.vid is not None:
-        prof.vendor_id = args.vid
-    if not prof.verified and not args.dry_run:
-        print(
-            f"warning: profile '{prof.name}' is unverified (protocol: {prof.protocol}). "
-            "Use --dry-run to inspect packets first.",
-            file=sys.stderr,
-        )
-    return Keyboard(prof, Transport(prof, product_id=args.pid, dry_run=args.dry_run))
 
 
 # ------------------------------------------------------------------ commands
@@ -96,83 +74,29 @@ def _board(args):
                      trace=args.trace)
 
 
-def _is_hfd(args) -> bool:
-    return profiles.load(args.profile).protocol == "hfd"
-
-
 def cmd_rgb(args) -> int:
     if args.rgb_cmd == "effects":
-        if _is_hfd(args):
-            from . import hfd
-
-            print("  off  (lights off)")
-            for name, (value, desc) in hfd.EFFECTS.items():
-                print(f"{value:3d}  {name:12s} {desc}")
-        else:
-            for mode in protocol.Mode:
-                print(f"{int(mode):3d}  {mode.name.lower()}")
+        print("  off  (lights off)")
+        for name, (value, desc) in hfd.EFFECTS.items():
+            print(f"{value:3d}  {name:12s} {desc}")
         return 0
-    if _is_hfd(args):
-        board = _board(args)
-        if args.rgb_cmd == "all":
-            board.set_key_colors({}, default=args.color, brightness=args.brightness)
-        elif args.rgb_cmd == "keys":
-            chosen = {}
-            for item in args.assign:
-                name, _, color = item.rpartition("=")
-                if not name:
-                    raise ValueError(f"expected KEY=COLOUR, got {item!r}")
-                chosen[name] = parse_color(color)
-            board.set_key_colors(chosen, default=args.default, brightness=args.brightness)
-        elif args.rgb_cmd == "mode":
-            board.set_lighting(args.mode, args.color, args.brightness, args.speed, args.rainbow, args.direction)
-        else:
-            raise DeviceError(f"'rgb {args.rgb_cmd}' is not available for this keyboard")
-        return 0
-    kb = _keyboard(args)
-    if args.rgb_cmd == "mode":
-        kb.set_lighting(
-            protocol.Lighting(
-                mode=_royuan_mode(args.mode),
-                color=args.color,
-                speed=args.speed,
-                brightness=args.brightness,
-                rainbow=args.rainbow,
-                direction=protocol.Direction[args.direction.upper()],  # same names in both protocols
-            )
-        )
+    board = _board(args)
+    if args.rgb_cmd == "all":
+        board.set_key_colors({}, default=args.color, brightness=args.brightness)
     elif args.rgb_cmd == "keys":
-        colors = {}
+        chosen = {}
         for item in args.assign:
             name, _, color = item.rpartition("=")
             if not name:
-                raise SystemExit(f"expected KEY=COLOUR, got {item!r}")
-            colors[name] = parse_color(color)
-        kb.set_key_colors(colors, default=args.default)
-    elif args.rgb_cmd == "all":
-        kb.set_key_colors({key.name: args.color for key in kb.profile.keys})
-    elif args.rgb_cmd == "probe":
-        if args.index is not None:
-            kb.probe_index(args.index, args.color)
-            return 0
-        print("Lighting one firmware index at a time. Note which key lights up; Ctrl+C to stop.")
-        for index in range(args.start, kb.profile.rgb_slots):
-            kb.probe_index(index, args.color)
-            known = [k.name for k in kb.profile.keys if k.index == index]
-            reply = input(f"index {index:3d} (profile: {known[0] if known else '-'}) > enter for next, q to quit: ")
-            if reply.strip().lower() == "q":
-                break
+                raise ValueError(f"expected KEY=COLOUR, got {item!r}")
+            chosen[name] = parse_color(color)
+        board.set_key_colors(chosen, default=args.default, brightness=args.brightness)
+    elif args.rgb_cmd == "mode":
+        board.set_lighting(args.mode, args.color, args.brightness, args.speed, args.rainbow, args.direction)
     return 0
 
 
-def _royuan_mode(name: str) -> protocol.Mode:
-    try:
-        return protocol.Mode[name.upper()]
-    except KeyError:
-        raise ValueError(f"unknown effect {name!r}; known: {', '.join(m.name.lower() for m in protocol.Mode)}") from None
-
-
-def _remap_hfd(args) -> int:
+def cmd_remap(args) -> int:
     board = _board(args)
     layer = "fn" if args.fn else "base"
     prefix = "Fn+" if args.fn else ""
@@ -226,18 +150,6 @@ def cmd_system(args) -> int:
     return 0
 
 
-def cmd_remap(args) -> int:
-    if _is_hfd(args):
-        return _remap_hfd(args)
-    if not args.key or not args.to:
-        raise ValueError("usage: infi75 remap KEY TARGET")
-    kb = _keyboard(args)
-    hid_code = hidkeys.code(args.to)
-    kb.remap(args.key, hid_code)
-    print(f"{args.key} -> {hidkeys.name(hid_code)} (0x{hid_code:02x})", file=sys.stderr)
-    return 0
-
-
 def _upload_screen_hfd(args) -> int:
     board = _board(args)
     count = board.upload_image(args.path, fit=args.fit, slot=args.slot,
@@ -247,18 +159,10 @@ def _upload_screen_hfd(args) -> int:
 
 
 def cmd_screen(args) -> int:
-    if _is_hfd(args):
-        if args.screen_cmd == "time":
-            _board(args).sync_time(datetime.fromisoformat(args.at) if args.at else None)
-            return 0
-        return _upload_screen_hfd(args)
-    kb = _keyboard(args)
-    if args.screen_cmd == "image":
-        width, height = args.size if args.size else (None, None)
-        kb.upload_image(args.path, width, height)
-    elif args.screen_cmd == "time":
-        kb.sync_time(datetime.fromisoformat(args.at) if args.at else None)
-    return 0
+    if args.screen_cmd == "time":
+        _board(args).sync_time(datetime.fromisoformat(args.at) if args.at else None)
+        return 0
+    return _upload_screen_hfd(args)
 
 
 def cmd_macro(args) -> int:
@@ -386,7 +290,7 @@ def _analyze(reports: list[capture.Report], verbose: bool) -> None:
     repeats = 0
     for n, report in enumerate(reports):
         data = report.data
-        label = protocol.describe(data)
+        label = hfd.describe(data)
         if data[:1] == b"\xa5" and len(data) >= 7:
             total = int.from_bytes(data[4:7], "little")
             label += _screen_size_hint(total // 2)
@@ -411,12 +315,13 @@ def _screen_size_hint(pixels: int) -> str:
 
 
 def cmd_replay(args) -> int:
-    kb = _keyboard(args)
+    """Send captured configuration packets to the keyboard again (interface 3, 64-byte feature reports)."""
     reports = capture.outgoing(capture.load(args.file))
     if args.only_interface is not None:
         reports = [r for r in reports if r.interface == args.only_interface]
-    sent = kb.replay(reports, args.to_interface)
-    print(f"sent {sent} reports", file=sys.stderr)
+    packets = [r.data[:hfd.PACKET].ljust(hfd.PACKET, b"\0") for r in reports if r.kind in ("feature", "text")]
+    sent = _board(args).replay(packets)
+    print(f"sent {sent} packets", file=sys.stderr)
     return 0
 
 
@@ -563,8 +468,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="infi75", description="Configure the Infiverse INFI75 keyboard.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--profile", help="keyboard profile JSON (default: bundled INFI75 profile)")
-    parser.add_argument("--vid", type=_int, help="override USB vendor id, e.g. 0x3151")
-    parser.add_argument("--pid", type=_int, help="select USB product id, e.g. 0x4015")
+    parser.add_argument("--vid", type=_int, help="override USB vendor id (default 0x05ac)")
+    parser.add_argument("--pid", type=_int, help="override USB product id (default 0x024f)")
     parser.add_argument("-n", "--dry-run", action="store_true", help="print packets instead of sending them")
     parser.add_argument("--trace", action="store_true",
                         help="print every packet sent to the keyboard (>) and every reply read back (<)")
@@ -584,21 +489,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("mode", help="effect name or number; 'infi75 rgb effects' lists them")
     p.add_argument("--color", type=parse_color, default=(255, 255, 255))
     p.add_argument("--speed", type=int, default=3, help="0-5")
-    p.add_argument("--brightness", type=int, default=4, help="0-5 (INFI75), 0-4 (Royuan boards)")
+    p.add_argument("--brightness", type=int, default=4, help="0-5")
     p.add_argument("--rainbow", action="store_true", help="cycle colours instead of --color")
     p.add_argument("--direction", choices=["left", "right", "up", "down"], default="right")
-    rgb_sub.add_parser("effects", help="list the lighting effects of the selected keyboard")
+    rgb_sub.add_parser("effects", help="list the lighting effects")
     p = rgb_sub.add_parser("keys", help="per-key colours, e.g. ESC=red W=#00ff00 '#40=255,0,0'")
     p.add_argument("assign", nargs="+", metavar="KEY=COLOUR")
     p.add_argument("--default", type=parse_color, default=(0, 0, 0), help="colour for unlisted keys")
-    p.add_argument("--brightness", type=int, default=5, help="0-5 (INFI75)")
+    p.add_argument("--brightness", type=int, default=5, help="0-5")
     p = rgb_sub.add_parser("all", help="set every key to one colour")
     p.add_argument("color", type=parse_color)
-    p.add_argument("--brightness", type=int, default=5, help="0-5 (INFI75)")
-    p = rgb_sub.add_parser("probe", help="light firmware indices one by one to map them to keys")
-    p.add_argument("--index", type=int, help="light only this index and exit")
-    p.add_argument("--start", type=int, default=0)
-    p.add_argument("--color", type=parse_color, default=(255, 255, 255))
+    p.add_argument("--brightness", type=int, default=5, help="0-5")
     rgb.set_defaults(func=cmd_rgb)
 
     p = sub.add_parser("remap", help="make a key send a different key code")
@@ -610,11 +511,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reset", action="store_true", help="restore every key to its default")
     p.add_argument("--list", action="store_true", help="show the remaps written by this tool (both layers)")
     p.add_argument("--fn", action="store_true",
-                   help="the Fn layer: what the key does while Fn is held (INFI75; not Esc, F5, F6, "
+                   help="the Fn layer: what the key does while Fn is held (not Esc, F5, F6, "
                         "Backspace, \\, Win, Fn)")
     p.set_defaults(func=cmd_remap)
 
-    p = sub.add_parser("system", help="game mode, key blocking and sleep timer (INFI75); no options: show")
+    p = sub.add_parser("system", help="game mode, key blocking and sleep timer; no options: show")
     p.add_argument("--game-mode", choices=["on", "off"])
     p.add_argument("--block", metavar="KEYS",
                    help="keys disabled in game mode, comma separated: alttab, altf4, win, or none")
@@ -626,15 +527,14 @@ def build_parser() -> argparse.ArgumentParser:
     scr_sub = scr.add_subparsers(dest="screen_cmd", required=True)
     p = scr_sub.add_parser("image", help="upload an image or animated GIF")
     p.add_argument("path")
-    p.add_argument("--size", type=parse_size, help="screen resolution WxH (Royuan boards)")
     p.add_argument("--fit", choices=["crop", "stretch", "pad"], default="crop",
-                   help="how to fit the image to the 135x240 screen (INFI75)")
-    p.add_argument("--slot", type=int, default=1, help="screen slot written by the upload (INFI75, default 1)")
+                   help="how to fit the image to the 135x240 screen")
+    p.add_argument("--slot", type=int, default=1, help="screen slot written by the upload (default 1)")
     p = scr_sub.add_parser("time", help="sync the screen clock")
     p.add_argument("--at", help="ISO timestamp instead of now")
     scr.set_defaults(func=cmd_screen)
 
-    mac = sub.add_parser("macro", help="key sequences a key can play (INFI75)")
+    mac = sub.add_parser("macro", help="key sequences a key can play")
     mac_sub = mac.add_subparsers(dest="macro_cmd", required=True)
     mac_sub.add_parser("list", help="list saved macros")
     p = mac_sub.add_parser("save", help="add or replace a macro and write the macro table")
@@ -686,10 +586,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--interface", type=int, help="only reports sent to this interface")
     cap.set_defaults(func=cmd_capture)
 
-    p = sub.add_parser("replay", help="send reports from a capture or hex text file to the keyboard")
+    p = sub.add_parser("replay", help="send configuration packets from a capture or hex text file to the keyboard")
     p.add_argument("file")
     p.add_argument("--only-interface", type=int, help="replay only reports captured on this interface")
-    p.add_argument("--to-interface", type=int, help="send everything to this interface")
     p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("probe", help="identify the keyboard's protocol (read-only)")

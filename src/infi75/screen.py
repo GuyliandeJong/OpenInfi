@@ -33,29 +33,18 @@ def preview_frames(path: str | Path, width: int, height: int, max_frames: int,
     return frames
 
 
-def encode(image: Image.Image, width: int, height: int, transpose: bool = True,
-           byteorder: str = "big", fit: str = "crop") -> bytes:
-    """Scale *image* to width x height and return RGB565 bytes.
+def encode(image: Image.Image, width: int, height: int, byteorder: str = "little", fit: str = "crop") -> bytes:
+    """Scale *image* to width x height and return RGB565 bytes, row by row from the top left.
 
     *fit* is "crop" (fill, cropping the overflow), "stretch" (what the
-    INFI75 vendor driver does) or "pad" (letterbox on black). With
-    *transpose* the pixels are emitted column by column, which is the
-    order the RT100 firmware expects.
+    INFI75 vendor driver does) or "pad" (letterbox on black).
     """
     frame = fit_frame(image, width, height, fit)
-    if transpose:
-        frame = frame.transpose(Image.Transpose.TRANSPOSE)
     raw = frame.tobytes()
     out = bytearray()
     for i in range(0, len(raw), 3):
         out += rgb565(raw[i], raw[i + 1], raw[i + 2]).to_bytes(2, byteorder)
     return bytes(out)
-
-
-def encode_file(path: str | Path, width: int, height: int, transpose: bool = True) -> bytes:
-    with Image.open(path) as image:
-        image.seek(0)  # first frame of animated formats
-        return encode(image, width, height, transpose)
 
 
 def frames_from_file(path: str | Path, width: int, height: int, max_frames: int, fit: str = "crop",
@@ -67,5 +56,5 @@ def frames_from_file(path: str | Path, width: int, height: int, max_frames: int,
         for n in range(min(count, max_frames)):
             image.seek(n)
             duration = int(image.info.get("duration", 100) or 100)
-            frames.append((encode(image, width, height, False, byteorder, fit), duration))
+            frames.append((encode(image, width, height, byteorder, fit), duration))
     return frames

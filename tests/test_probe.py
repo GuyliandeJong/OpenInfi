@@ -1,9 +1,5 @@
-import pytest
-
 from infi75 import probe
-from infi75 import profile as profiles
-from infi75.device import Keyboard
-from infi75.transport import DeviceError, Transport, udev_rule
+from infi75.transport import udev_rule
 
 # Vendor collection 0xFF68/0x61: 64-byte input, 4096-byte output, no report IDs.
 LCD_DESCRIPTOR = bytes.fromhex(
@@ -44,14 +40,6 @@ def test_parse_device_info():
     info = probe.parse_device_info(bytes(payload))
     assert info["firmware"] == "1.07" and info["vid"] == "0x05ac" and info["pid"] == "0x024f"
     assert info["battery"] == 80
-
-
-def test_unconfirmed_protocol_blocks_writes():
-    prof = profiles.load()
-    prof.protocol = "unconfirmed"
-    keyboard = Keyboard(prof, Transport(prof, dry_run=False))
-    with pytest.raises(DeviceError, match="infi75 probe"):
-        keyboard.sync_time()
 
 
 def test_udev_rule_is_scoped_to_product():
