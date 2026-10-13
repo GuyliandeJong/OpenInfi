@@ -121,8 +121,9 @@ def cmd_rgb(args) -> int:
         if _is_hfd(args):
             from . import hfd
 
-            for name, value in hfd.MODES.items():
-                print(f"{value:3d}  {name}")
+            print("  off  (lights off)")
+            for name, (value, desc) in hfd.EFFECTS.items():
+                print(f"{value:3d}  {name:12s} {desc}")
         else:
             for mode in protocol.Mode:
                 print(f"{int(mode):3d}  {mode.name.lower()}")
@@ -132,11 +133,15 @@ def cmd_rgb(args) -> int:
 
         if args.rgb_cmd != "mode":
             raise DeviceError(f"'rgb {args.rgb_cmd}' is not implemented for this keyboard yet")
+        if args.mode.strip().lower() == "off":
+            mode, brightness = hfd.OFF
+        else:
+            mode, brightness = hfd.resolve_mode(args.mode), args.brightness
         settings = hfd.Lighting(
-            mode=hfd.resolve_mode(args.mode),
+            mode=mode,
             color=args.color,
             rainbow=args.rainbow,
-            brightness=args.brightness,
+            brightness=brightness,
             speed=args.speed,
             direction=hfd.DIRECTIONS[args.direction],
         )

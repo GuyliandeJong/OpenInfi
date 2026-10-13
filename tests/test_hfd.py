@@ -91,3 +91,10 @@ def test_cli_dry_run_uses_hfd_by_default(capsys):
     assert code == 0
     lines = [l for l in err.splitlines() if l.startswith("[dry-run")]
     assert [l.split("] ")[1][:5] for l in lines] == ["04 18", "04 13", "08 ff", "04 02", "04 f0"]
+
+
+def test_off_is_single_on_at_zero_brightness(capsys):
+    assert cli.main(["--dry-run", "rgb", "mode", "off"]) == 0
+    data = [l for l in capsys.readouterr().err.splitlines() if l.startswith("[dry-run")][2]
+    packet = bytes.fromhex(data.split("] ")[1])
+    assert packet[0] == 0x02 and packet[9] == 0

@@ -32,14 +32,35 @@ FINISH = 0xF0
 MODE = 0x13
 TIME = 0x28
 
-# Effect numbers as used by the AK820 Pro firmware family; names follow
-# gohv/EPOMAKER-Ajazz-AK820-Pro. Verify each on the INFI75.
-MODES = {
-    "off": 0x00, "static": 0x01, "single-on": 0x02, "single-off": 0x03, "glittering": 0x04,
-    "falling": 0x05, "colourful": 0x06, "breath": 0x07, "spectrum": 0x08, "outward": 0x09,
-    "scrolling": 0x0A, "rolling": 0x0B, "rotating": 0x0C, "explode": 0x0D, "launch": 0x0E,
-    "ripples": 0x0F, "flowing": 0x10, "pulsating": 0x11, "tilt": 0x12, "shuttle": 0x13,
+# Effect numbers, named after gohv/EPOMAKER-Ajazz-AK820-Pro and checked on
+# an INFI75-1.2 (descriptions are what that keyboard showed).
+EFFECTS = {
+    "effect-0": (0x00, "fixed blue, ignores --color"),
+    "static": (0x01, "steady colour"),
+    "single-on": (0x02, "dark, keys light up when pressed"),
+    "single-off": (0x03, "lit, keys go dark when pressed"),
+    "glittering": (0x04, "dimmed colour"),
+    "falling": (0x05, "rainfall, random blinking"),
+    "colourful": (0x06, "random rainbow"),
+    "breath": (0x07, "breathing"),
+    "spectrum": (0x08, "colour rolling"),
+    "outward": (0x09, "pulsing"),
+    "scrolling": (0x0A, "pulsing"),
+    "rolling": (0x0B, "faster pulsing"),
+    "rotating": (0x0C, "pulsing"),
+    "explode": (0x0D, "pulsing"),
+    "launch": (0x0E, "pulse on key press"),
+    "ripples": (0x0F, "faster pulse on key press"),
+    "flowing": (0x10, "rows sweeping top to bottom, left to right"),
+    "pulsating": (0x11, "twinkle running left to right"),
+    "tilt": (0x12, "faster twinkle"),
+    "shuttle": (0x13, "sweep right to left"),
 }
+MODES = {name: value for name, (value, _) in EFFECTS.items()}
+# Effect 0 is not "off" on the INFI75; a dark keyboard is effect 2 at
+# brightness 0, which is also what the AK820 tool sends.
+OFF = (0x02, 0)
+
 DIRECTIONS = {"left": 0, "down": 1, "up": 2, "right": 3}
 MAX_LEVEL = 5  # brightness and speed run 0-5
 
