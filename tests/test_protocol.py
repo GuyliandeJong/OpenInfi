@@ -68,3 +68,9 @@ def test_describe_roundtrip():
     assert protocol.describe(packet) == "remap key index=41 -> HID 0x29"
     (start, *_) = protocol.screen_image(bytes(240 * 135 * 2))
     assert "32400 RGB565 pixels" in protocol.describe(start)
+
+
+def test_describe_online_frames():
+    request = bytes.fromhex("aa1038000000010000")
+    assert protocol.describe(request) == "online request GET_DEVICE_INFO len=56 addr=0 last=1"
+    assert protocol.describe(bytes.fromhex("5523100000000000")).startswith("online reply SET_LED_EFFECT")

@@ -31,11 +31,11 @@ class CaptureError(ValueError):
 
 @dataclass(frozen=True)
 class Report:
-    """One host-to-device HID report."""
+    """One HID report, host-to-device unless ``kind == "input"``."""
 
     data: bytes
     interface: int | None = None  # None when only the endpoint is known
-    kind: str = "feature"  # feature | output | interrupt
+    kind: str = "feature"  # feature | output | interrupt (host to device) | input (device to host)
     report_id: int | None = None
     device: int | None = None
     timestamp: float = 0.0
@@ -133,6 +133,8 @@ def _usbpcap(frames):
                     yield report
         elif transfer == 1 and to_device and not endpoint & 0x80 and payload:
             yield Report(data=bytes(payload), kind="interrupt", device=device, timestamp=ts)
+        elif transfer == 1 and not to_device and endpoint & 0x80 and payload:
+            yield Report(data=bytes(payload), kind="input", device=device, timestamp=ts)
 
 
 def _usbmon(frames, header_len: int):
@@ -140,9 +142,12 @@ def _usbmon(frames, header_len: int):
         if len(frame) < header_len:
             continue
         _id, ev, xfer, ep, dev, _bus, flag_setup, _flag_data = struct.unpack_from("<QcBBBHbb", frame, 0)
+        data = frame[header_len:]
+        if ev == b"C" and ep & 0x80 and xfer == 1 and data:
+            yield Report(data=bytes(data), kind="input", device=dev, timestamp=ts)
+            continue
         if ev != b"S" or ep & 0x80:
             continue
-        data = frame[header_len:]
         if xfer == 2 and flag_setup == 0:
             report = _setup_to_report(frame[40:48], data, dev, ts)
             if report:
@@ -187,6 +192,11 @@ def _from_text(text: str) -> list[Report]:
             raise CaptureError(f"line {lineno}: not hex: {raw!r}") from None
         reports.append(Report(data=data, interface=interface, kind="text"))
     return reports
+
+
+def outgoing(reports: list[Report]) -> list[Report]:
+    """Only host-to-device reports (what replay and diff operate on)."""
+    return [r for r in reports if r.kind != "input"]
 
 
 def load(path: str | Path) -> list[Report]:

@@ -45,7 +45,7 @@ def test_usbpcap_split_stages_and_interrupt(tmp_path):
         _usbpcap_frame(7, 0, 1, b"\x06abc"),
         _usbpcap_frame(7, 1, 2, b""),  # status/completion, ignored
         _usbpcap_frame(8, 0, 0, b"\x01\x02", transfer=1, endpoint=0x02),
-        _usbpcap_frame(9, 1, 0, b"\x09\x09", transfer=1, endpoint=0x81),  # IN, ignored
+        _usbpcap_frame(9, 1, 0, b"\x09\x09", transfer=1, endpoint=0x81),  # device-to-host
     ]
     path = tmp_path / "b.pcapng"
     path.write_bytes(_pcapng(capture.LINKTYPE_USBPCAP, frames))
@@ -53,6 +53,7 @@ def test_usbpcap_split_stages_and_interrupt(tmp_path):
     assert [(r.data, r.interface, r.kind, r.report_id) for r in reports] == [
         (b"\x06abc", 2, "feature", 6),
         (b"\x01\x02", None, "interrupt", None),
+        (b"\x09\x09", None, "input", None),
     ]
 
 
@@ -82,3 +83,21 @@ def test_text_roundtrip_and_diff(tmp_path):
     assert [(r.data, r.interface) for r in loaded] == [(b"\x07\x01", 1), (b"\x07\x02", 2)]
     other = [capture.Report(b"\x07\x01"), capture.Report(b"\x07\x05\x01")]
     assert capture.diff(loaded, other) == [(1, [(1, 0x02, 0x05), (2, 0x00, 0x01)])]
+
+
+def test_usbmon_interrupt_in_and_out(tmp_path):
+    def frame(ev: bytes, ep: int, data: bytes) -> bytes:
+        head = struct.pack("<QcBBBHbbqiiII", 1, ev, 1, ep, 4, 1, 1, 0, 0, 0, 0, len(data), len(data))
+        return head + bytes(64 - len(head)) + data
+
+    request = bytes.fromhex("aa1038000000010000") + bytes(4087)
+    reply = bytes.fromhex("5510300000000000") + bytes(56)
+    frames = [frame(b"S", 0x02, request), frame(b"C", 0x02, b""), frame(b"S", 0x81, b""), frame(b"C", 0x81, reply)]
+    blob = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, capture.LINKTYPE_USB_LINUX_MMAPPED)
+    for ts, f in enumerate(frames):
+        blob += struct.pack("<IIII", ts, 0, len(f), len(f)) + f
+    path = tmp_path / "bind.pcap"
+    path.write_bytes(blob)
+    reports = capture.load(path)
+    assert [(r.kind, r.data[:2]) for r in reports] == [("interrupt", b"\xaa\x10"), ("input", b"\x55\x10")]
+    assert capture.outgoing(reports) == reports[:1]

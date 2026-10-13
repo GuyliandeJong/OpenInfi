@@ -148,6 +148,7 @@ def cmd_capture(args) -> int:
     if args.interface is not None:
         reports = [r for r in reports if r.interface == args.interface]
     if args.capture_cmd == "extract":
+        reports = capture.outgoing(reports)
         text = capture.to_text(reports)
         if args.output:
             with open(args.output, "w", encoding="utf-8") as handle:
@@ -158,7 +159,8 @@ def cmd_capture(args) -> int:
     elif args.capture_cmd == "analyze":
         _analyze(reports, args.verbose)
     elif args.capture_cmd == "diff":
-        other = capture.load(args.other)
+        reports = capture.outgoing(reports)
+        other = capture.outgoing(capture.load(args.other))
         if args.interface is not None:
             other = [r for r in other if r.interface == args.interface]
         if len(reports) != len(other):
@@ -176,7 +178,7 @@ def cmd_capture(args) -> int:
 
 def _analyze(reports: list[capture.Report], verbose: bool) -> None:
     if not reports:
-        print("no host-to-device HID reports found")
+        print("no HID reports found")
         return
     devices = Counter(r.device for r in reports)
     print(f"{len(reports)} reports; per USB device address: {dict(devices)}")
@@ -190,7 +192,7 @@ def _analyze(reports: list[capture.Report], verbose: bool) -> None:
         if data[:1] == b"\xa5" and len(data) >= 7:
             total = int.from_bytes(data[4:7], "little")
             label += _screen_size_hint(total // 2)
-        signature = (report.interface, data[:1], label.split(" ")[0])
+        signature = (report.kind, report.interface, tuple(label.split()[:3]))
         if not verbose and signature == previous:
             repeats += 1
             continue
@@ -198,7 +200,8 @@ def _analyze(reports: list[capture.Report], verbose: bool) -> None:
             print(f"      ... {repeats} similar")
             repeats = 0
         previous = signature
-        print(f"{n:5d} if={report.interface} {report.kind:9s} {data[:16].hex(' ')}{' ..' if len(data) > 16 else ''}  {label}")
+        arrow = "<-" if report.kind == "input" else "->"
+        print(f"{n:5d} {arrow} if={report.interface} {report.kind:9s} {data[:16].hex(' ')}{' ..' if len(data) > 16 else ''}  {label}")
     if repeats:
         print(f"      ... {repeats} similar")
 
@@ -211,7 +214,7 @@ def _screen_size_hint(pixels: int) -> str:
 
 def cmd_replay(args) -> int:
     kb = _keyboard(args)
-    reports = capture.load(args.file)
+    reports = capture.outgoing(capture.load(args.file))
     if args.only_interface is not None:
         reports = [r for r in reports if r.interface == args.only_interface]
     sent = kb.replay(reports, args.to_interface)

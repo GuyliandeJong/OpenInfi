@@ -164,11 +164,26 @@ def screen_image(pixels: bytes, size: int = 64) -> list[bytes]:
     return packets
 
 
+ONLINE_COMMANDS = {
+    1: "COMMUNICATION_START", 2: "COMMUNICATION_END", 15: "SET_FACTORY_RESET", 16: "GET_DEVICE_INFO",
+    17: "GET_GAME_MODE", 18: "GET_KEY", 19: "GET_LED_EFFECT", 20: "GET_CUSTOM_LED_DATA", 21: "GET_MACRO",
+    22: "GET_FN_KEY", 28: "GET_DEFAULT_FN_KEY_MATRIX", 31: "GET_DEFAULT_KEY_MATRIX", 33: "SET_GAME_MODE",
+    34: "SET_KEY", 35: "SET_LED_EFFECT", 36: "SET_CUSTOM_LED_DATA", 37: "SET_MACRO", 38: "SET_FN_KEY",
+    52: "SET_TEMPORARY_COMMAND_DATA", 64: "SET_LED_BOOT_ANIMATION", 65: "SET_LED_USER_ANIMATION",
+    80: "SET_TFT_USER_ANIMATION", 81: "SET_TFT_BUILT_IN_INDEX",
+}
+
+
 def describe(packet: bytes) -> str:
-    """Best-effort human description of a packet in this protocol family."""
+    """Best-effort human description of a packet (Royuan or AJAZZ/HFD "online" framing)."""
     if not packet:
         return "empty"
     op = packet[0]
+    if op in (0xAA, 0x55) and len(packet) >= 8:
+        direction = "request" if op == 0xAA else "reply"
+        name = ONLINE_COMMANDS.get(packet[1], f"cmd 0x{packet[1]:02x}")
+        addr = packet[3] | (packet[4] << 8)
+        return f"online {direction} {name} len={packet[2]} addr={addr} last={packet[6]}"
     if op == 0x07 and len(packet) >= 9:
         try:
             mode = Mode(packet[1]).name
