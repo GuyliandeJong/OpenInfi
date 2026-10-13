@@ -148,3 +148,25 @@ def test_remap_cli_accumulates_and_resets(tmp_path, monkeypatch, capsys):
     table = b"".join(p for p in link.sent[-12:-2])
     assert not any(table[:574])
     assert (tmp_path / "infi75" / "keymap.json").read_text().strip() == "{}"
+
+
+def test_key_colors_transaction():
+    link = FakeLink()
+    hfd.Session(link, delay=0).set_key_colors([(1, (255, 0, 0)), (55, (0, 0, 255))])
+    heads = [p[:2].hex() for p in link.sent]
+    assert heads[0] == "0420" and link.sent[0][8] == 8
+    data = b"".join(link.sent[1:9])
+    assert data[:8] == bytes([1, 255, 0, 0, 55, 0, 0, 255]) and not any(data[8:])
+    assert heads[9] == "0402"
+    assert heads[10:] == ["0418", "0413", "80ff", "0402", "04f0"]
+    assert link.sent[12][9:11] == bytes([5, 5])
+
+
+def test_cli_rgb_keys_lists_every_layout_key(capsys):
+    assert cli.main(["--dry-run", "rgb", "keys", "ESC=red", "--default", "0,0,10"]) == 0
+    lines = [l.split("] ")[1] for l in capsys.readouterr().err.splitlines() if l.startswith("[dry-run")]
+    data = bytes.fromhex("".join(lines[1:9]))
+    entries = [data[i:i + 4] for i in range(0, 78 * 4, 4)]
+    assert entries[0] == bytes([1, 255, 0, 0])  # ESC is first in layout order
+    assert all(e[1:] == bytes([0, 0, 10]) for e in entries[1:])
+    assert not any(data[78 * 4:])

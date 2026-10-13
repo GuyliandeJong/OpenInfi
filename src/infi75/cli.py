@@ -132,6 +132,21 @@ def cmd_rgb(args) -> int:
     if _is_hfd(args):
         from . import hfd
 
+        if args.rgb_cmd in ("keys", "all"):
+            prof = profiles.load(args.profile)
+            if args.rgb_cmd == "all":
+                chosen = {key.name: args.color for key in prof.keys}
+                default = args.color
+            else:
+                chosen = {}
+                for item in args.assign:
+                    name, _, color = item.rpartition("=")
+                    if not name:
+                        raise ValueError(f"expected KEY=COLOUR, got {item!r}")
+                    chosen[prof.key(name).name] = parse_color(color)
+                default = args.default
+            colors = [(key.index, chosen.get(key.name, default)) for key in prof.keys]
+            return _run_hfd(args, lambda s: s.set_key_colors(colors, brightness=args.brightness))
         if args.rgb_cmd != "mode":
             raise DeviceError(f"'rgb {args.rgb_cmd}' is not implemented for this keyboard yet")
         if args.mode.strip().lower() == "off":
@@ -504,8 +519,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = rgb_sub.add_parser("keys", help="per-key colours, e.g. ESC=red W=#00ff00 '#40=255,0,0'")
     p.add_argument("assign", nargs="+", metavar="KEY=COLOUR")
     p.add_argument("--default", type=parse_color, default=(0, 0, 0), help="colour for unlisted keys")
+    p.add_argument("--brightness", type=int, default=5, help="0-5 (INFI75)")
     p = rgb_sub.add_parser("all", help="set every key to one colour")
     p.add_argument("color", type=parse_color)
+    p.add_argument("--brightness", type=int, default=5, help="0-5 (INFI75)")
     p = rgb_sub.add_parser("probe", help="light firmware indices one by one to map them to keys")
     p.add_argument("--index", type=int, help="light only this index and exit")
     p.add_argument("--start", type=int, default=0)

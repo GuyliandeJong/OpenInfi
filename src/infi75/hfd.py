@@ -32,6 +32,10 @@ FINISH = 0xF0
 MODE = 0x13
 TIME = 0x28
 KEYMAP = 0x11  # base layer
+KEY_COLORS = 0x20
+
+CUSTOM_MODE = 0x80  # shows the per-key colours uploaded with KEY_COLORS
+KEY_COLOR_PACKETS = 8  # 128 entries of [slot, R, G, B]
 
 KEYMAP_PACKETS = 9  # announced in the KEYMAP header
 KEYMAP_SENT = 10  # the vendor driver sends 0x2b6 >> 6 = 10 packets
@@ -181,6 +185,19 @@ def keymap_payload(entries: dict[int, bytes]) -> bytes:
     return bytes(buf)
 
 
+def key_colors_payload(colors: list[tuple[int, tuple[int, int, int]]]) -> bytes:
+    """List of [slot, R, G, B] entries, in the order given, zero-padded to 512 bytes."""
+    size = KEY_COLOR_PACKETS * PACKET
+    if len(colors) * 4 > size:
+        raise ProtocolError(f"at most {size // 4} keys")
+    buf = bytearray(size)
+    for n, (slot, (r, g, b)) in enumerate(colors):
+        if not 0 < slot <= 0xFF:
+            raise ProtocolError(f"invalid light slot {slot}")
+        buf[n * 4 : n * 4 + 4] = bytes((slot, r, g, b))
+    return bytes(buf)
+
+
 class Session:
     """Sends packets with the vendor driver's pacing and acknowledgement checks."""
 
@@ -235,6 +252,15 @@ class Session:
             self.send(payload[offset : offset + PACKET], ack=False)
         self.send(command(SAVE))
         self.send(command(FINISH))
+
+    def set_key_colors(self, colors: list[tuple[int, tuple[int, int, int]]], brightness: int = 5) -> None:
+        """Upload per-key colours, then switch to the custom effect that displays them."""
+        payload = key_colors_payload(colors)
+        self.send(command(KEY_COLORS, byte8=KEY_COLOR_PACKETS))
+        for offset in range(0, len(payload), PACKET):
+            self.send(payload[offset : offset + PACKET], ack=False)
+        self.send(command(SAVE))
+        self.set_lighting(Lighting(mode=CUSTOM_MODE, brightness=brightness, speed=MAX_LEVEL))
 
     def sync_time(self, when: datetime | None = None) -> None:
         self.send(command(START))
