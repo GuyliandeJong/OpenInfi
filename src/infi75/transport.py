@@ -174,6 +174,11 @@ def udev_rule(vendor_id: int, product_ids: list[int] | None = None) -> str:
         lines.append(f'SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", {match.replace("ATTRS", "ATTR")}, '
                      'MODE="0660", TAG+="uaccess"')
         if pid is not None:
+            # start the user's clock sync (infi75 clock install) when the keyboard is plugged in;
+            # 05ac is Apple's vendor ID, so also match the product name
+            lines.append(f'SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", '
+                         f'{match.replace("ATTRS", "ATTR")}, ATTR{{product}}=="INFI75*", '
+                         'TAG+="systemd", ENV{SYSTEMD_USER_WANTS}+="infi75-clock.service"')
             # Bluetooth HID (bus 0005) has no USB attributes; match the HID device name
             lines.append(f'SUBSYSTEM=="hidraw", KERNELS=="0005:{vendor_id:04X}:{pid:04X}.*", '
                          'MODE="0660", TAG+="uaccess"')

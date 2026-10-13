@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import clock
 from .. import profile as profiles
 from ..board import InfiBoard
 from ..transport import DeviceError
@@ -177,6 +178,8 @@ class MainWindow(QMainWindow):
         self.remap.remap_requested.connect(self.apply_remaps)
         self.screen.upload_requested.connect(self.upload_image)
         self.screen.sync_requested.connect(self.sync_clock)
+        self.screen.set_auto_sync(clock.installed())
+        self.screen.auto_sync_toggled.connect(self.set_auto_sync)
         self.device.check_requested.connect(self.run_check)
         self.device.simulate_toggled.connect(self.set_simulate)
 
@@ -295,6 +298,18 @@ class MainWindow(QMainWindow):
 
     def sync_clock(self) -> None:
         self.run("Syncing clock", lambda b: b.sync_time())
+
+    def set_auto_sync(self, on: bool) -> None:
+        try:
+            if on:
+                clock.install()
+                self.toast.show_message("✓ The clock now syncs automatically", "ok")
+            else:
+                clock.uninstall()
+                self.toast.show_message("Automatic clock sync turned off", "ok")
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.screen.set_auto_sync(clock.installed())
+            self.toast.show_message(f"Automatic sync failed: {exc}", "error", timeout_ms=7000)
 
     def run_check(self) -> None:
         if self.busy:

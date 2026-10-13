@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from collections import Counter
 from datetime import datetime
 
@@ -221,6 +222,41 @@ def cmd_screen(args) -> int:
         kb.upload_image(args.path, width, height)
     elif args.screen_cmd == "time":
         kb.sync_time(datetime.fromisoformat(args.at) if args.at else None)
+    return 0
+
+
+def cmd_clock(args) -> int:
+    from . import clock
+
+    if args.clock_cmd == "sync":
+        board = _board(args)
+        when = datetime.fromisoformat(args.at) if args.at else None
+        if not args.dry_run and (args.if_present or args.wait):
+            deadline = time.monotonic() + args.wait
+            while board.connection() != "usb" and time.monotonic() < deadline:
+                time.sleep(0.5)
+            if board.connection() != "usb":
+                if args.if_present:
+                    print("keyboard not connected by USB; nothing to do", file=sys.stderr)
+                    return 0
+                raise DeviceError("keyboard not connected by USB")
+            time.sleep(1 if args.wait else 0)  # let a freshly plugged keyboard finish starting up
+        board.sync_time(when, save=not args.no_save)
+        print(f"keyboard clock set to {(when or datetime.now()):%Y-%m-%d %H:%M:%S}")
+    elif args.clock_cmd == "install":
+        folder = clock.install(args.every)
+        print(f"installed {clock.SERVICE} and {clock.TIMER} in {folder}")
+        print(f"the clock is synced 30 s after login and every {clock.check_interval(args.every)}")
+        print("to also sync on plug-in, install the current udev rule: "
+              "infi75 udev | sudo tee /etc/udev/rules.d/70-infi75.rules")
+    elif args.clock_cmd == "uninstall":
+        clock.uninstall()
+        print("automatic clock sync removed")
+    elif args.clock_cmd == "status":
+        if clock.installed():
+            print(f"automatic sync: on, every {clock.interval()} and on plug-in (units in {clock.unit_dir()})")
+        else:
+            print("automatic sync: off ('infi75 clock install' turns it on)")
     return 0
 
 
@@ -496,6 +532,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = scr_sub.add_parser("time", help="sync the screen clock")
     p.add_argument("--at", help="ISO timestamp instead of now")
     scr.set_defaults(func=cmd_screen)
+
+    clk = sub.add_parser("clock", help="set the keyboard clock, once or automatically")
+    clk_sub = clk.add_subparsers(dest="clock_cmd", required=True)
+    p = clk_sub.add_parser("sync", help="set the keyboard clock to this computer's time now")
+    p.add_argument("--at", help="ISO timestamp instead of now")
+    p.add_argument("--if-present", action="store_true", help="exit quietly when the keyboard is not connected by USB")
+    p.add_argument("--wait", type=float, default=0, metavar="SECONDS",
+                   help="wait up to this long for the keyboard to appear (used on plug-in)")
+    p.add_argument("--no-save", action="store_true",
+                   help="EXPERIMENT: skip the SAVE command (tests whether the clock needs a settings-memory write)")
+    p = clk_sub.add_parser("install", help="sync automatically: after login, periodically and on plug-in")
+    p.add_argument("--every", default="6h", help="interval, e.g. 30min, 1h, 6h (default 6h)")
+    clk_sub.add_parser("uninstall", help="stop syncing automatically")
+    clk_sub.add_parser("status", help="show whether automatic sync is on")
+    clk.set_defaults(func=cmd_clock)
 
     cap = sub.add_parser("capture", help="inspect USB captures of the official software")
     cap_sub = cap.add_subparsers(dest="capture_cmd", required=True)

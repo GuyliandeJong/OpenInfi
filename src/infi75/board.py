@@ -164,8 +164,8 @@ class InfiBoard:
 
     # -------------------------------------------------------------- screen
 
-    def sync_time(self, when: datetime | None = None) -> None:
-        self._run(lambda s: s.sync_time(when))
+    def sync_time(self, when: datetime | None = None, save: bool = True) -> None:
+        self._run(lambda s: s.sync_time(when, save=save))
 
     def upload_image(self, path: str | Path, fit: str = "crop", slot: int = 1,
                      progress: Callable[[int, int], None] | None = None) -> int:

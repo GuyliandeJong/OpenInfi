@@ -711,6 +711,7 @@ class DropZone(QFrame):
 class ScreenPage(Page):
     upload_requested = Signal(str, str)
     sync_requested = Signal()
+    auto_sync_toggled = Signal(bool)
 
     SCALE = 1.6
 
@@ -783,10 +784,15 @@ class ScreenPage(Page):
         self.clock = QLabel()
         self.clock.setStyleSheet("font-size:20pt; font-weight:600;")
         clock_layout.addWidget(self.clock)
-        clock_layout.addWidget(muted("The keyboard keeps its own clock. Sync it with this computer when it "
-                                     "drifts or after the battery ran empty."))
+        clock_layout.addWidget(muted("The keyboard keeps its own clock, and it drifts. Sync it with this "
+                                     "computer now, or let it sync automatically."))
         self.sync_button = button("Sync clock now")
         clock_layout.addWidget(self.sync_button, 0, Qt.AlignLeft)
+        self.auto_sync = QCheckBox("Sync automatically: after login, every 6 hours and when the keyboard is "
+                                   "plugged in")
+        clock_layout.addWidget(self.auto_sync)
+        self.auto_sync_note = muted("Syncing on plug-in needs the current permission rule (Device page).")
+        clock_layout.addWidget(self.auto_sync_note)
         right.addWidget(clock_card)
         right.addStretch(1)
 
@@ -806,6 +812,12 @@ class ScreenPage(Page):
         self.fit_group.buttonClicked.connect(lambda _b: self._render())
         self.upload_button.clicked.connect(lambda: self.path and self.upload_requested.emit(self.path, self.fit()))
         self.sync_button.clicked.connect(self.sync_requested.emit)
+        self.auto_sync.toggled.connect(self.auto_sync_toggled.emit)
+
+    def set_auto_sync(self, on: bool) -> None:
+        self.auto_sync.blockSignals(True)
+        self.auto_sync.setChecked(on)
+        self.auto_sync.blockSignals(False)
 
     def fit(self) -> str:
         return next(k for k, b in self.fit_buttons.items() if b.isChecked())

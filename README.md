@@ -17,7 +17,7 @@ All confirmed on an INFI75-1.2 over USB on Linux:
 | Per-key colours | paint any keys, stored on the keyboard |
 | Key remapping | any key to another key, a combination (`ctrl+c`) or a media key; restore and reset |
 | Screen | still images and animated GIFs (135 x 240), with crop, stretch or letterbox fitting |
-| Clock | set the screen clock to the computer's time |
+| Clock | set the screen clock to the computer's time, once or automatically (after login, periodically, on plug-in) |
 
 Settings are stored on the keyboard and stay active over Bluetooth and
 after unplugging.
@@ -72,7 +72,7 @@ install the permission rule).
 | **Lighting** | Effect tiles grouped as static, animated and reactive, each with a short description. Pick a colour on the colour wheel or a swatch, rainbow, brightness, speed and direction; controls an effect does not use are disabled. Changes are sent automatically after a short pause (sliders when released), so dragging does not cause dozens of writes. |
 | **Key colours** | The keyboard drawn in its colours. Click a key, Shift-click to add, drag to select a group, or use the quick selections (letters, F-row, WASD, arrows). With keys selected, a colour click paints them. Presets: rainbow, gaming, rows, single colour, all off. Nothing is sent until **Apply to keyboard**; **Revert** undoes edits. |
 | **Remap keys** | Click a key, then press **Press to record a key** and press the key or combination it should produce (for example Ctrl+C), or choose from the searchable list including media keys. Remapped keys carry a badge; **Restore default** and **Restore all keys** undo. |
-| **Screen** | Drop an image or GIF (or browse). The preview shows exactly what the screen will display, animated for GIFs, for each fit: fill, fit with black bars, or stretch. **Send to keyboard** shows progress. The clock card syncs the keyboard clock. |
+| **Screen** | Drop an image or GIF (or browse). The preview shows exactly what the screen will display, animated for GIFs, for each fit: fill, fit with black bars, or stretch. **Send to keyboard** shows progress. The clock card syncs the keyboard clock now, or turns on automatic sync. |
 | **Device** | Connection, firmware and a read-only check of both keyboard channels and the permission rule, the permission command with a copy button, simulation mode (shows the data, sends nothing) and the activity log. |
 
 | Lighting | Remap keys |
@@ -105,7 +105,11 @@ infi75 remap --reset                                # restore all keys
 
 infi75 screen image wallpaper.png                   # --fit crop (default) | stretch | pad
 infi75 screen image animation.gif
-infi75 screen time
+infi75 clock sync                                   # set the keyboard clock now (same as: screen time)
+infi75 clock install                                # sync after login, every 6 h and on plug-in
+infi75 clock install --every 1h                     # other interval (minimum 5min)
+infi75 clock status
+infi75 clock uninstall
 
 infi75 --dry-run rgb all red                        # print packets, send nothing
 infi75 --trace remap A d                            # send, and print every packet and reply
@@ -119,6 +123,30 @@ keeps your remaps in `~/.config/infi75/keymap.json` and sends all of them
 each time. The app also remembers the last applied lighting
 (`lighting.json`) and key colours (`colors.json`) in the same folder, so it
 opens showing what is on the keyboard.
+
+## Automatic clock sync
+
+The keyboard clock drifts and cannot fetch the time itself. `infi75 clock
+install` (or the switch on the Screen page) writes two systemd user units to
+`~/.config/systemd/user/`:
+
+| Unit | Does |
+|---|---|
+| `infi75-clock.service` | runs `infi75 clock sync --if-present` once; exits quietly when the keyboard is not on USB |
+| `infi75-clock.timer` | starts the service 30 s after login and then every 6 hours |
+
+The udev rule from `infi75 udev` also starts the service whenever the
+keyboard is plugged in or switched to wired mode
+(`ENV{SYSTEMD_USER_WANTS}`). Reinstall the rule after updating:
+
+```console
+infi75 udev | sudo tee /etc/udev/rules.d/70-infi75.rules
+sudo udevadm control --reload
+```
+
+Logs: `journalctl --user -u infi75-clock`. Every sync ends with the
+keyboard's SAVE command, which writes its settings memory, so the interval
+has a 5-minute minimum.
 
 ## Why the official software does not work
 

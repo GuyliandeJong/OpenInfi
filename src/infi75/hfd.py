@@ -323,8 +323,9 @@ class Session:
                 progress(n + 1, len(chunks))
         self.send(command(SAVE))
 
-    def sync_time(self, when: datetime | None = None) -> None:
+    def sync_time(self, when: datetime | None = None, save: bool = True) -> None:
         self.send(command(START))
         self.send(command(TIME, byte8=1))
         self.send(time_data(when or datetime.now()))
-        self.send(command(SAVE))
+        if save:
+            self.send(command(SAVE))
