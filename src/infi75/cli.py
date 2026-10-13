@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter
 from datetime import datetime
@@ -89,28 +88,10 @@ def cmd_keys(args) -> int:
     return 0
 
 
-def _hfd_session(args):
-    """Open the libusb link to the configuration interface of an HFD-protocol board."""
-    from . import hfd, usbctl
+def _board(args):
+    from .board import InfiBoard
 
-    prof = profiles.load(args.profile)
-    vid = args.vid if args.vid is not None else prof.vendor_id
-    pid = args.pid if args.pid is not None else (prof.product_ids[0] if prof.product_ids else None)
-    if args.dry_run:
-        return prof, hfd.Session(None, dry_run=True), None
-    if pid is None:
-        raise DeviceError("profile has no product id; pass --pid")
-    link = usbctl.UsbHid(vid, pid, prof.lighting_interface or hfd.CONFIG_INTERFACE)
-    return prof, hfd.Session(link), link
-
-
-def _run_hfd(args, action) -> int:
-    from contextlib import nullcontext
-
-    _prof, session, link = _hfd_session(args)
-    with link if link is not None else nullcontext():
-        action(session)
-    return 0
+    return InfiBoard(profiles.load(args.profile), args.vid, args.pid, dry_run=args.dry_run)
 
 
 def _is_hfd(args) -> bool:
@@ -130,38 +111,22 @@ def cmd_rgb(args) -> int:
                 print(f"{int(mode):3d}  {mode.name.lower()}")
         return 0
     if _is_hfd(args):
-        from . import hfd
-
-        if args.rgb_cmd in ("keys", "all"):
-            prof = profiles.load(args.profile)
-            if args.rgb_cmd == "all":
-                chosen = {key.name: args.color for key in prof.keys}
-                default = args.color
-            else:
-                chosen = {}
-                for item in args.assign:
-                    name, _, color = item.rpartition("=")
-                    if not name:
-                        raise ValueError(f"expected KEY=COLOUR, got {item!r}")
-                    chosen[prof.key(name).name] = parse_color(color)
-                default = args.default
-            colors = {key.index: chosen.get(key.name, default) for key in prof.keys}
-            return _run_hfd(args, lambda s: s.set_key_colors(colors, brightness=args.brightness))
-        if args.rgb_cmd != "mode":
-            raise DeviceError(f"'rgb {args.rgb_cmd}' is not implemented for this keyboard yet")
-        if args.mode.strip().lower() == "off":
-            mode, brightness = hfd.OFF
+        board = _board(args)
+        if args.rgb_cmd == "all":
+            board.set_key_colors({}, default=args.color, brightness=args.brightness)
+        elif args.rgb_cmd == "keys":
+            chosen = {}
+            for item in args.assign:
+                name, _, color = item.rpartition("=")
+                if not name:
+                    raise ValueError(f"expected KEY=COLOUR, got {item!r}")
+                chosen[name] = parse_color(color)
+            board.set_key_colors(chosen, default=args.default, brightness=args.brightness)
+        elif args.rgb_cmd == "mode":
+            board.set_lighting(args.mode, args.color, args.brightness, args.speed, args.rainbow, args.direction)
         else:
-            mode, brightness = hfd.resolve_mode(args.mode), args.brightness
-        settings = hfd.Lighting(
-            mode=mode,
-            color=args.color,
-            rainbow=args.rainbow,
-            brightness=brightness,
-            speed=args.speed,
-            direction=hfd.DIRECTIONS[args.direction],
-        )
-        return _run_hfd(args, lambda s: s.set_lighting(settings))
+            raise DeviceError(f"'rgb {args.rgb_cmd}' is not available for this keyboard")
+        return 0
     kb = _keyboard(args)
     if args.rgb_cmd == "mode":
         kb.set_lighting(
@@ -205,50 +170,21 @@ def _royuan_mode(name: str) -> protocol.Mode:
         raise ValueError(f"unknown effect {name!r}; known: {', '.join(m.name.lower() for m in protocol.Mode)}") from None
 
 
-def _keymap_state_path():
-    import os
-    from pathlib import Path
-
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    return base / "infi75" / "keymap.json"
-
-
 def _remap_hfd(args) -> int:
-    """Remaps accumulate in a state file because each write replaces the whole table."""
-    from . import hfd
-
-    prof = profiles.load(args.profile)
-    path = _keymap_state_path()
-    try:
-        state: dict[str, str] = json.loads(path.read_text()) if path.exists() else {}
-    except (OSError, ValueError):
-        state = {}
+    board = _board(args)
     if args.list:
-        for name, target in sorted(state.items()):
-            print(f"{name} -> {target}")
-        if not state:
-            print("no remaps (all keys default)")
-        return 0
-    if args.reset:
+        state = board.remaps()
+    elif args.reset:
+        board.reset_remaps()
         state = {}
     else:
         if not args.key or not args.to:
             raise ValueError("usage: infi75 remap KEY TARGET  (or --reset / --list)")
-        key = prof.key(args.key)
-        hfd.key_entry(args.to)  # validate before storing
-        if args.to.strip().lower() in ("default", "reset"):
-            state.pop(key.name, None)
-        else:
-            state[key.name] = args.to
-    entries = {prof.key(name).index: hfd.key_entry(target) for name, target in state.items()}
-    _run_hfd(args, lambda s: s.write_keymap(entries))
-    if not args.dry_run:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, indent=2, sort_keys=True))
+        state = board.remap(args.key, args.to)
     for name, target in sorted(state.items()):
-        print(f"{name} -> {target}", file=sys.stderr)
+        print(f"{name} -> {target}")
     if not state:
-        print("all keys restored to default", file=sys.stderr)
+        print("no remaps (all keys default)")
     return 0
 
 
@@ -264,47 +200,19 @@ def cmd_remap(args) -> int:
     return 0
 
 
-def _screen_pipe(vid: int, pid: int):
-    """hidraw handle on the screen interface (0xFF68), which the kernel HID driver serves."""
-    from . import hfd
-    from .transport import _hid
-
-    for interface in enumerate_interfaces(vid, pid):
-        if interface.interface == hfd.SCREEN_INTERFACE:
-            device = _hid().device()
-            device.open_path(interface.path)
-            return device
-    raise DeviceError(f"screen interface {hfd.SCREEN_INTERFACE} not found")
-
-
 def _upload_screen_hfd(args) -> int:
-    from . import hfd, screen
-
-    frames = screen.frames_from_file(args.path, hfd.SCREEN_WIDTH, hfd.SCREEN_HEIGHT,
-                                     hfd.SCREEN_MAX_FRAMES, fit=args.fit)
-    print(f"{len(frames)} frame(s) of {hfd.SCREEN_WIDTH}x{hfd.SCREEN_HEIGHT}", file=sys.stderr)
-    prof, session, link = _hfd_session(args)
-    if link is None:
-        session.upload_screen(frames, None, slot=args.slot)
-        return 0
-    vid = args.vid if args.vid is not None else prof.vendor_id
-    pid = args.pid if args.pid is not None else prof.product_ids[0]
-    pipe = _screen_pipe(vid, pid)
-    try:
-        with link:
-            session.upload_screen(frames, pipe, slot=args.slot,
-                                  progress=lambda n, total: print(f"\r{n}/{total}", end="", file=sys.stderr))
-        print(file=sys.stderr)
-    finally:
-        pipe.close()
+    board = _board(args)
+    count = board.upload_image(args.path, fit=args.fit, slot=args.slot,
+                               progress=lambda n, total: print(f"\r{n}/{total}", end="", file=sys.stderr))
+    print(f"\nuploaded {count} frame(s)", file=sys.stderr)
     return 0
 
 
 def cmd_screen(args) -> int:
     if _is_hfd(args):
         if args.screen_cmd == "time":
-            when = datetime.fromisoformat(args.at) if args.at else None
-            return _run_hfd(args, lambda s: s.sync_time(when))
+            _board(args).sync_time(datetime.fromisoformat(args.at) if args.at else None)
+            return 0
         return _upload_screen_hfd(args)
     kb = _keyboard(args)
     if args.screen_cmd == "image":

@@ -1,4 +1,4 @@
-"""Tkinter configurator: lighting, per-key colours, key remapping and the screen."""
+"""Tkinter configurator for HFD-protocol keyboards (the INFI75)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import threading
 import tkinter as tk
 from tkinter import colorchooser, filedialog, messagebox, ttk
 
-from . import hidkeys, protocol
+from . import hfd, hidkeys
 from . import profile as profiles
-from .device import Keyboard
-from .transport import DeviceError, Transport
+from .board import InfiBoard
+from .transport import DeviceError
 
 UNIT = 46  # pixels per 1u key
 
@@ -20,12 +20,13 @@ class App:
         self.root = root
         self.args = args
         self.profile = profiles.load(args.profile)
-        if args.vid is not None:
-            self.profile.vendor_id = args.vid
+        if self.profile.protocol != "hfd":
+            raise DeviceError("the GUI supports HFD-protocol keyboards (the INFI75); use the CLI for others")
         self.dry_run = tk.BooleanVar(value=args.dry_run)
         self.key_colors: dict[str, tuple[int, int, int]] = {}
         self.selected: set[str] = set()
-        self.buttons: dict[str, int] = {}
+        self.rects: dict[str, int] = {}
+        self.labels: dict[str, int] = {}
 
         root.title(f"INFI75 configurator - {self.profile.name}")
         notebook = ttk.Notebook(root)
@@ -37,13 +38,12 @@ class App:
         bottom = ttk.Frame(root)
         bottom.pack(fill="x", padx=8)
         ttk.Checkbutton(bottom, text="Dry run (log packets, do not send)", variable=self.dry_run).pack(side="left")
-        if not self.profile.verified:
-            ttk.Label(bottom, text="Profile unverified - see README", foreground="#b05000").pack(side="right")
-        self.log = tk.Text(root, height=8, state="disabled", font=("TkFixedFont", 9))
+        self.log = tk.Text(root, height=7, state="disabled", font=("TkFixedFont", 9))
         self.log.pack(fill="both", padx=8, pady=(4, 8))
         # Worker threads must not touch Tk; they post here and the UI thread drains it.
         self.events: queue.Queue = queue.Queue()
         self._drain_events()
+        self._show_remaps()
 
     # ---------------------------------------------------------------- plumbing
 
@@ -54,30 +54,35 @@ class App:
     def _drain_events(self) -> None:
         try:
             while True:
-                kind, message = self.events.get_nowait()
+                kind, payload = self.events.get_nowait()
+                if kind == "call":
+                    payload()
+                    continue
                 self.log.configure(state="normal")
-                self.log.insert("end", message + "\n")
+                self.log.insert("end", payload + "\n")
                 self.log.see("end")
                 self.log.configure(state="disabled")
                 if kind == "error":
-                    messagebox.showerror("INFI75", message)
+                    messagebox.showerror("INFI75", payload)
         except queue.Empty:
             pass
         self.root.after(100, self._drain_events)
 
-    def _keyboard(self) -> Keyboard:
-        transport = Transport(self.profile, self.args.pid, self.dry_run.get(), log=self._write_log)
-        return Keyboard(self.profile, transport)
+    def _board(self) -> InfiBoard:
+        return InfiBoard(self.profile, self.args.vid, self.args.pid, dry_run=self.dry_run.get(),
+                         log=self._write_log)
 
-    def _run(self, label: str, action) -> None:
+    def _run(self, label: str, action, then=None) -> None:
         """Run a device action off the UI thread and report the outcome."""
-        keyboard = self._keyboard()  # reads Tk variables, so build it on the UI thread
+        board = self._board()  # reads Tk variables, so build it on the UI thread
 
         def work() -> None:
             try:
-                action(keyboard)
+                result = action(board)
                 self._write_log(f"ok: {label}")
-            except (DeviceError, ValueError, KeyError, OSError) as exc:
+                if then:
+                    self.events.put(("call", lambda: then(result)))
+            except (DeviceError, ValueError, KeyError, OSError, RuntimeError) as exc:
                 self.events.put(("error", f"error: {label}: {exc}"))
 
         threading.Thread(target=work, daemon=True).start()
@@ -86,24 +91,27 @@ class App:
 
     def _lighting_tab(self, parent) -> ttk.Frame:
         frame = ttk.Frame(parent, padding=12)
-        self.mode = tk.StringVar(value="static")
+        self.effect = tk.StringVar(value="static")
         self.speed = tk.IntVar(value=3)
-        self.brightness = tk.IntVar(value=4)
+        self.brightness = tk.IntVar(value=5)
         self.rainbow = tk.BooleanVar(value=False)
         self.direction = tk.StringVar(value="right")
         self.color = (255, 255, 255)
 
+        effects = ttk.Combobox(frame, textvariable=self.effect, state="readonly", values=InfiBoard.effects())
+        effects.bind("<<ComboboxSelected>>", lambda _e: self._describe_effect())
         rows = [
-            ("Effect", ttk.Combobox(frame, textvariable=self.mode, state="readonly",
-                                    values=[m.name.lower() for m in protocol.Mode])),
-            ("Speed", tk.Scale(frame, variable=self.speed, from_=0, to=5, orient="horizontal")),
-            ("Brightness", tk.Scale(frame, variable=self.brightness, from_=0, to=4, orient="horizontal")),
+            ("Effect", effects),
+            ("Brightness", tk.Scale(frame, variable=self.brightness, from_=0, to=hfd.MAX_LEVEL, orient="horizontal")),
+            ("Speed", tk.Scale(frame, variable=self.speed, from_=0, to=hfd.MAX_LEVEL, orient="horizontal")),
             ("Direction", ttk.Combobox(frame, textvariable=self.direction, state="readonly",
-                                       values=[d.name.lower() for d in protocol.Direction])),
+                                       values=list(hfd.DIRECTIONS))),
         ]
         for n, (label, widget) in enumerate(rows):
             ttk.Label(frame, text=label).grid(row=n, column=0, sticky="w", pady=3)
             widget.grid(row=n, column=1, sticky="ew", pady=3)
+        self.effect_note = ttk.Label(frame, foreground="#666666")
+        self.effect_note.grid(row=0, column=2, sticky="w", padx=8)
         self.swatch = tk.Button(frame, text="Colour", width=12, bg="#ffffff", command=self._pick_global_color)
         self.swatch.grid(row=len(rows), column=1, sticky="w", pady=3)
         ttk.Checkbutton(frame, text="Rainbow (ignore colour)", variable=self.rainbow).grid(
@@ -111,7 +119,13 @@ class App:
         ttk.Button(frame, text="Apply lighting", command=self._apply_lighting).grid(
             row=len(rows) + 2, column=1, sticky="w", pady=10)
         frame.columnconfigure(1, weight=1)
+        self._describe_effect()
         return frame
+
+    def _describe_effect(self) -> None:
+        name = self.effect.get()
+        note = "lights off" if name == "off" else hfd.EFFECTS.get(name, (0, ""))[1]
+        self.effect_note.configure(text=note)
 
     def _pick_global_color(self) -> None:
         rgb, hex_color = colorchooser.askcolor(color=_hex(self.color), parent=self.root)
@@ -120,15 +134,10 @@ class App:
             self.swatch.configure(bg=hex_color)
 
     def _apply_lighting(self) -> None:
-        settings = protocol.Lighting(
-            mode=protocol.Mode[self.mode.get().upper()],
-            color=self.color,
-            speed=self.speed.get(),
-            brightness=self.brightness.get(),
-            rainbow=self.rainbow.get(),
-            direction=protocol.Direction[self.direction.get().upper()],
-        )
-        self._run("set lighting", lambda kb: kb.set_lighting(settings))
+        effect, color, brightness = self.effect.get(), self.color, self.brightness.get()
+        speed, rainbow, direction = self.speed.get(), self.rainbow.get(), self.direction.get()
+        self._run(f"lighting {effect}",
+                  lambda b: b.set_lighting(effect, color, brightness, speed, rainbow, direction))
 
     # -------------------------------------------------------------------- keys
 
@@ -144,82 +153,102 @@ class App:
                                                 fill="#000000", outline="#888888", width=2)
             label = self.canvas.create_text((x0 + x0 + key.w * UNIT) / 2, y0 + UNIT / 2,
                                             text=_short(key.name), fill="#dddddd", font=("TkDefaultFont", 8))
-            self.buttons[key.name] = rect
+            self.rects[key.name], self.labels[key.name] = rect, label
             for item in (rect, label):
                 self.canvas.tag_bind(item, "<Button-1>", lambda _e, n=key.name: self._toggle(n))
 
-        controls = ttk.Frame(frame)
-        controls.pack(fill="x", pady=8)
-        ttk.Label(controls, text="Click keys to select.").pack(side="left")
-        ttk.Button(controls, text="Clear selection", command=self._clear_selection).pack(side="left", padx=4)
-        ttk.Button(controls, text="Colour selected...", command=self._color_selected).pack(side="left", padx=4)
-        ttk.Button(controls, text="Send key colours", command=self._send_key_colors).pack(side="left", padx=4)
+        colours = ttk.LabelFrame(frame, text="Per-key colours", padding=6)
+        colours.pack(fill="x", pady=(8, 4))
+        ttk.Button(colours, text="Colour selected...", command=self._color_selected).pack(side="left", padx=2)
+        ttk.Button(colours, text="Select all", command=self._select_all).pack(side="left", padx=2)
+        ttk.Button(colours, text="Clear selection", command=self._clear_selection).pack(side="left", padx=2)
+        ttk.Button(colours, text="Clear colours", command=self._clear_colors).pack(side="left", padx=2)
+        ttk.Button(colours, text="Apply colours", command=self._send_key_colors).pack(side="right", padx=2)
 
-        remap = ttk.Frame(frame)
+        remap = ttk.LabelFrame(frame, text="Remap (selected key)", padding=6)
         remap.pack(fill="x")
-        ttk.Label(remap, text="Remap selected key to:").pack(side="left")
         self.remap_target = tk.StringVar(value="esc")
-        ttk.Combobox(remap, textvariable=self.remap_target, values=hidkeys.names(), width=16).pack(side="left", padx=4)
-        ttk.Button(remap, text="Remap", command=self._remap_selected).pack(side="left", padx=4)
+        targets = sorted(hfd.MEDIA) + [n for n in hidkeys.names() if n != "none"] + ["default"]
+        ttk.Combobox(remap, textvariable=self.remap_target, values=targets, width=16).pack(side="left", padx=2)
+        ttk.Label(remap, text="(also ctrl+c style combinations)").pack(side="left", padx=4)
+        ttk.Button(remap, text="Remap", command=self._remap_selected).pack(side="left", padx=2)
+        ttk.Button(remap, text="Reset all remaps", command=self._reset_remaps).pack(side="right", padx=2)
+        self.remap_list = ttk.Label(frame, foreground="#666666", wraplength=int(width))
+        self.remap_list.pack(fill="x", pady=(4, 0))
         return frame
 
     def _toggle(self, name: str) -> None:
-        if name in self.selected:
-            self.selected.discard(name)
-        else:
-            self.selected.add(name)
-        self.canvas.itemconfigure(self.buttons[name], outline="#ffcc00" if name in self.selected else "#888888")
+        self.selected.symmetric_difference_update({name})
+        self.canvas.itemconfigure(self.rects[name], outline="#ffcc00" if name in self.selected else "#888888")
+
+    def _select_all(self) -> None:
+        for key in self.profile.keys:
+            if key.name not in self.selected:
+                self._toggle(key.name)
 
     def _clear_selection(self) -> None:
         for name in list(self.selected):
             self._toggle(name)
 
+    def _clear_colors(self) -> None:
+        self.key_colors.clear()
+        for name, rect in self.rects.items():
+            self.canvas.itemconfigure(rect, fill="#000000")
+
     def _color_selected(self) -> None:
         if not self.selected:
-            messagebox.showinfo("INFI75", "Select one or more keys first.")
+            messagebox.showinfo("INFI75", "Click one or more keys first.")
             return
         rgb, hex_color = colorchooser.askcolor(parent=self.root)
         if not rgb:
             return
         for name in self.selected:
             self.key_colors[name] = tuple(int(c) for c in rgb)
-            self.canvas.itemconfigure(self.buttons[name], fill=hex_color)
+            self.canvas.itemconfigure(self.rects[name], fill=hex_color)
 
     def _send_key_colors(self) -> None:
-        colors = dict(self.key_colors)
-        self._run("set key colours", lambda kb: kb.set_key_colors(colors))
+        colors, brightness = dict(self.key_colors), self.brightness.get()
+        self._run("apply key colours", lambda b: b.set_key_colors(colors, brightness=brightness))
 
     def _remap_selected(self) -> None:
         if len(self.selected) != 1:
             messagebox.showinfo("INFI75", "Select exactly one key to remap.")
             return
         (name,) = self.selected
+        target = self.remap_target.get()
         try:
-            hid_code = hidkeys.code(self.remap_target.get())
-        except KeyError as exc:
-            messagebox.showerror("INFI75", str(exc.args[0]))
+            hfd.key_entry(target)
+        except (KeyError, ValueError) as exc:
+            messagebox.showerror("INFI75", str(exc))
             return
-        self._run(f"remap {name} -> {hidkeys.name(hid_code)}", lambda kb: kb.remap(name, hid_code))
+        self._run(f"remap {name} -> {target}", lambda b: b.remap(name, target), then=self._show_remaps)
+
+    def _reset_remaps(self) -> None:
+        if messagebox.askyesno("INFI75", "Restore every key to its default?"):
+            self._run("reset remaps", lambda b: b.reset_remaps(), then=self._show_remaps)
+
+    def _show_remaps(self, state=None) -> None:
+        state = state if state is not None else self._board().remaps()
+        text = ", ".join(f"{k} -> {v}" for k, v in sorted(state.items())) or "none"
+        self.remap_list.configure(text=f"Active remaps: {text}")
 
     # ------------------------------------------------------------------ screen
 
     def _screen_tab(self, parent) -> ttk.Frame:
         frame = ttk.Frame(parent, padding=12)
         self.image_path = tk.StringVar()
-        self.width = tk.StringVar(value=str(self.profile.screen_width or ""))
-        self.height = tk.StringVar(value=str(self.profile.screen_height or ""))
-        ttk.Label(frame, text="Image").grid(row=0, column=0, sticky="w")
+        self.fit = tk.StringVar(value="crop")
+        ttk.Label(frame, text=f"Image or GIF ({hfd.SCREEN_WIDTH}x{hfd.SCREEN_HEIGHT})").grid(row=0, column=0, sticky="w")
         ttk.Entry(frame, textvariable=self.image_path, width=50).grid(row=0, column=1, sticky="ew")
         ttk.Button(frame, text="Browse...", command=self._browse).grid(row=0, column=2, padx=4)
-        size = ttk.Frame(frame)
-        size.grid(row=1, column=1, sticky="w", pady=6)
-        ttk.Label(size, text="Width").pack(side="left")
-        ttk.Entry(size, textvariable=self.width, width=6).pack(side="left", padx=4)
-        ttk.Label(size, text="Height").pack(side="left")
-        ttk.Entry(size, textvariable=self.height, width=6).pack(side="left", padx=4)
-        ttk.Button(frame, text="Upload image", command=self._upload).grid(row=2, column=1, sticky="w")
+        ttk.Label(frame, text="Fit").grid(row=1, column=0, sticky="w")
+        ttk.Combobox(frame, textvariable=self.fit, state="readonly", values=["crop", "stretch", "pad"],
+                     width=10).grid(row=1, column=1, sticky="w", pady=6)
+        ttk.Button(frame, text="Upload", command=self._upload).grid(row=2, column=1, sticky="w")
+        self.progress = ttk.Progressbar(frame, length=300)
+        self.progress.grid(row=3, column=1, sticky="w", pady=6)
         ttk.Button(frame, text="Sync clock to this computer", command=lambda: self._run(
-            "sync time", lambda kb: kb.sync_time())).grid(row=3, column=1, sticky="w", pady=12)
+            "sync time", lambda b: b.sync_time())).grid(row=4, column=1, sticky="w", pady=12)
         frame.columnconfigure(1, weight=1)
         return frame
 
@@ -230,17 +259,15 @@ class App:
             self.image_path.set(path)
 
     def _upload(self) -> None:
-        path = self.image_path.get()
-        try:
-            width = int(self.width.get()) if self.width.get() else None
-            height = int(self.height.get()) if self.height.get() else None
-        except ValueError:
-            messagebox.showerror("INFI75", "Width and height must be whole numbers.")
-            return
+        path, fit = self.image_path.get(), self.fit.get()
         if not path:
             messagebox.showinfo("INFI75", "Choose an image first.")
             return
-        self._run("upload image", lambda kb: kb.upload_image(path, width, height))
+
+        def progress(n: int, total: int) -> None:
+            self.events.put(("call", lambda: self.progress.configure(maximum=total, value=n)))
+
+        self._run("upload image", lambda b: b.upload_image(path, fit=fit, progress=progress))
 
 
 def _hex(rgb: tuple[int, int, int]) -> str:
@@ -251,8 +278,9 @@ def _short(name: str) -> str:
     return {"BACKSPACE": "Bksp", "BACKSLASH": "\\", "LBRACKET": "[", "RBRACKET": "]", "SEMICOLON": ";",
             "QUOTE": "'", "COMMA": ",", "DOT": ".", "SLASH": "/", "GRAVE": "`", "MINUS": "-", "EQUAL": "=",
             "SPACE": "", "LSHIFT": "Shift", "RSHIFT": "Shift", "LCTRL": "Ctrl", "RCTRL": "Ctrl",
-            "LALT": "Alt", "RALT": "Alt", "LWIN": "Win"}.get(
-        name, name if len(name) <= 2 or name[1:].isdigit() else name.title())
+            "LALT": "Alt", "RALT": "Alt", "LWIN": "Win", "PGUP": "PgUp", "PGDN": "PgDn", "ENTER": "Enter",
+            "CAPS": "Caps", "TAB": "Tab", "LEFT": "\u2190", "RIGHT": "\u2192", "UP": "\u2191", "DOWN": "\u2193",
+            }.get(name, name if len(name) <= 2 or name[1:].isdigit() else name.title())
 
 
 def run(args) -> int:

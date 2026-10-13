@@ -11,41 +11,46 @@ Linux / Windows / macOS (via [hidapi](https://github.com/libusb/hidapi)).
 | Display | upload an image (any format Pillow reads), sync the clock |
 | Reverse engineering | decode, diff, extract and replay USB captures of the official software |
 
-## Status: read this first
+## Status
 
-Confirmed on hardware (wired USB): the INFI75 enumerates as **`05ac:024f`**
-with a **SONiX** controller (`SONiX INFI75-1.2`), exposing a vendor
-feature collection (usage page `0xFFFF`) on interface 1 and a vendor
-collection (`0xFF68`, usage `0x61`) on interface 2. Over Bluetooth it shows
-up as `INFI75 5.3` without vendor interfaces, so configuration requires the
-cable.
+Working on an Infiverse INFI75 (USB ID `05ac:024f`, product string
+`INFI75-1.2`, SONiX SN32F290 / HFD RKGK890), confirmed on the hardware:
 
-The configuration protocol is **not identified yet**. Two families are
-known for this USB ID and interface layout:
+| Feature | Command |
+|---|---|
+| 19 lighting effects, colour, brightness 0-5, speed 0-5, direction, rainbow, off | `infi75 rgb mode` |
+| Per-key colours (stored on the keyboard) | `infi75 rgb keys`, `infi75 rgb all` |
+| Key remapping: keys, combinations, media keys, reset | `infi75 remap` |
+| Screen: still images and animated GIFs (135x240) | `infi75 screen image` |
+| Screen clock sync | `infi75 screen time` |
+| All of the above in a window | `infi75 gui` |
 
-| Family | Transport | Reference |
-|---|---|---|
-| "online" (AJAZZ/HFD web driver) | output reports, `0xAA` frames, `0x55` replies | [ak820pro-modder](https://github.com/wsclx/ak820pro-modder/blob/main/docs/PROTOCOL.md) |
-| "legacy" | 64-byte feature reports starting `0x04` | [MonKey](https://github.com/snailb1007/MonKey), OpenRGB Valkyrie VK99 |
+Configuration requires the USB cable in wired mode. Over Bluetooth the
+keyboard exposes no configuration interface.
 
-Run the read-only identification and share its output:
+### Why the official software does not work on this keyboard
 
-```console
-infi75 probe
-```
+The `INFI75-1.2` firmware declares its configuration interface (interface 3,
+usage page `0xFF13`) without an interrupt IN endpoint. Operating system HID
+drivers refuse such an interface, so neither the INFI75 Driver V1.1 nor the
+Epomaker web hub can reach it. Its feature reports travel over the USB
+control endpoint, so this tool sends them directly through libusb. The
+screen image goes to interface 2 (`0xFF68`) through hidraw as usual.
 
-It prints each interface's report descriptor sizes, sends only
-`GET_DEVICE_INFO`, and reads feature reports. It writes no settings.
+The command set (`04 18` start, `04 13` effect, `04 11` keymap, `04 23`
+per-key colours, `04 28` clock, `04 72` screen, `04 02` save, `04 f0`
+finish) was decoded from the vendor driver and matches
+[gohv/EPOMAKER-Ajazz-AK820-Pro](https://github.com/gohv/EPOMAKER-Ajazz-AK820-Pro)
+and OpenRGB's Valkyrie controller. See `src/infi75/hfd.py` for the packet
+layouts.
 
-Until the protocol is confirmed, the profile is marked
-`"protocol": "unconfirmed"` and the lighting/remap/screen commands refuse
-to write to the device; `--dry-run` still works. The packet builders in
-`protocol.py` implement the Royuan (VID `0x3151`) family used by Epomaker's
-RT100, which turned out not to be what the INFI75 uses.
+Older Epomaker boards built on the Royuan platform (VID `0x3151`, e.g. the
+RT100) are supported by `src/infi75/protocol.py` through a profile with
+`"protocol": "royuan"`.
 
 ## Install
 
-Python 3.10+.
+Python 3.10+ and libusb 1.0 (`libusb` on Arch/CachyOS, `libusb-1.0-0` on Debian/Ubuntu).
 
 ```console
 git clone https://github.com/guyliandejong/infi75 && cd infi75
@@ -72,40 +77,34 @@ Bluetooth; wireless modes are not supported.
 ## Usage
 
 ```console
-infi75 gui                                    # graphical configurator
-infi75 list                                   # find the keyboard's HID interfaces
+infi75 gui                                        # graphical configurator
 
-infi75 rgb mode static --color "#ff8800" --brightness 4
-infi75 rgb mode drift --rainbow --speed 5 --direction left
+infi75 rgb effects                                # list effects
+infi75 rgb mode static --color "#ff8800" --brightness 5
+infi75 rgb mode spectrum --rainbow --speed 4
+infi75 rgb mode off
+
 infi75 rgb all purple
-infi75 rgb keys ESC=red W=green A=green S=green D=green --default 20,20,20
+infi75 rgb keys W=red A=red S=red D=red --default 0,0,40
 
-infi75 keys                                   # physical key names
-infi75 keys --hid                             # remap target names
+infi75 keys                                       # physical key names
 infi75 remap CAPS lctrl
-infi75 remap '#59' f13                        # by firmware index
+infi75 remap F12 volup                            # volup voldown mute playpause next prev stop
+infi75 remap RALT ctrl+c
+infi75 remap --list
+infi75 remap --reset
 
-infi75 screen image wallpaper.png --size 240x135
+infi75 screen image wallpaper.png                 # --fit crop|stretch|pad
+infi75 screen image animation.gif
 infi75 screen time
 
-infi75 --dry-run rgb all red                  # print packets, send nothing
+infi75 --dry-run rgb all red                      # print packets, send nothing
+infi75 probe --usb 3                              # read-only check of the configuration interface
 ```
 
-Global options go before the command: `--profile FILE`, `--vid 0x05ac`,
-`--pid 0x024f`, `--dry-run`.
-
-Effects: `static breathing spectrum drift ripple twinkle stream shadowing
-peaks sine_wave surging blooming laser peak_turn rain snow meteor
-snow_trace light_shadow`.
-
-## Mapping key indices
-
-```console
-infi75 rgb probe
-```
-
-lights one firmware index at a time and shows which profile key is assumed
-for it. Correct mismatches in your profile copy (`"index"` of each key).
+Every remap write replaces the keyboard's whole table, so the tool keeps
+your remaps in `~/.config/infi75/keymap.json` and re-sends all of them each
+time.
 
 ## Learning the real protocol from the official software
 
@@ -152,7 +151,11 @@ pytest
 
 | Module | Role |
 |---|---|
-| `protocol.py` | pure packet builders and decoder |
+| `hfd.py` | INFI75 packet builders and session (acknowledgement handling) |
+| `board.py` | INFI75 operations shared by CLI and GUI |
+| `usbctl.py` | libusb control transfers for the unbound configuration interface |
+| `probe.py` | read-only interface and descriptor probing |
+| `protocol.py` | Royuan packet builders and decoder |
 | `transport.py` | hidapi discovery, report I/O, pacing |
 | `device.py` | operations that route packets to interfaces |
 | `capture.py` | pcap / pcapng (USBPcap, usbmon) and hex-text parsing, diff |
@@ -162,10 +165,10 @@ pytest
 
 ## Safety
 
-Every command writes volatile or persistent settings the same way the
-vendor software does; none writes firmware. A wrong packet on an
-incompatible board is normally ignored, but there is no guarantee. Try
-`--dry-run` and compare with a capture first.
+Every command writes settings the same way the vendor driver does; none
+writes firmware. Do not run the firmware updaters shipped with the vendor
+driver package on an `INFI75-1.2`: they target a different firmware
+revision (`INFI75`, Bluetooth `INFI75 5.1`).
 
 ## License
 
