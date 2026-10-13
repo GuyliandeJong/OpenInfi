@@ -171,3 +171,49 @@ def test_cli_rgb_keys_fills_every_layout_slot(capsys):
     assert data[4:8] == bytes([1, 255, 0, 0])  # ESC, slot 1
     assert data[55 * 4 : 55 * 4 + 4] == bytes([55, 0, 0, 10])  # CAPS, slot 55
     assert data[14 * 4 : 14 * 4 + 4] == bytes(4)  # slot 14 has no key
+
+
+def test_screen_payload_layout():
+    frame = bytes(range(256)) * (hfd.SCREEN_FRAME // 256) + bytes(hfd.SCREEN_FRAME % 256)
+    chunks = hfd.screen_payload([(frame, 100)])
+    assert all(len(c) == 4096 for c in chunks)
+    assert len(chunks) == -(-(256 + hfd.SCREEN_FRAME) // 4096) == 16
+    data = b"".join(chunks)
+    assert data[0] == 1 and data[1] == 50 and set(data[2:256]) == {0xFF}
+    assert data[256 : 256 + hfd.SCREEN_FRAME] == frame
+    assert set(data[256 + hfd.SCREEN_FRAME :]) == {0xFF}
+
+
+class FakePipe:
+    def __init__(self):
+        self.writes = []
+
+    def write(self, data):
+        self.writes.append(bytes(data))
+        return len(data)
+
+    def read(self, size, timeout_ms):
+        return b""
+
+
+def test_upload_screen_sequence():
+    link, pipe = FakeLink(), FakePipe()
+    frame = bytes(hfd.SCREEN_FRAME)
+    hfd.Session(link, delay=0).upload_screen([(frame, 40), (frame, 40)], pipe, slot=1)
+    assert [p[:2].hex() for p in link.sent] == ["0418", "0472", "0402"]
+    header = link.sent[1]
+    chunks = -(-(256 + 2 * hfd.SCREEN_FRAME) // 4096)
+    assert header[2] == 1 and int.from_bytes(header[8:10], "little") == chunks
+    assert len(pipe.writes) == chunks and all(len(w) == 4097 and w[0] == 0 for w in pipe.writes)
+    assert pipe.writes[0][1:4] == bytes([2, 20, 20])
+
+
+def test_frames_from_file_little_endian_portrait(tmp_path):
+    from PIL import Image
+
+    from infi75 import screen
+
+    path = tmp_path / "red.png"
+    Image.new("RGB", (240, 135), (255, 0, 0)).save(path)
+    (pixels, duration), = screen.frames_from_file(path, 135, 240, 141, fit="stretch")
+    assert len(pixels) == hfd.SCREEN_FRAME and pixels[:2] == b"\x00\xf8"

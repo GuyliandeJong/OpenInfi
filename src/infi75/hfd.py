@@ -38,6 +38,14 @@ KEY_COLORS = 0x23  # stored custom colours shown by CUSTOM_MODE
 CUSTOM_MODE = 0x80
 KEY_COLOR_PACKETS = 9  # 144 slot-indexed entries of [slot, R, G, B], aa 55 at 574
 
+SCREEN = 0x72
+SCREEN_WIDTH, SCREEN_HEIGHT = 135, 240  # portrait, row-major, RGB565 little-endian
+SCREEN_FRAME = SCREEN_WIDTH * SCREEN_HEIGHT * 2  # 0xfd20
+SCREEN_HEADER = 0x100
+SCREEN_CHUNK = 0x1000  # one output report on the 0xFF68 interface
+SCREEN_MAX_FRAMES = 0x8D
+SCREEN_INTERFACE = 2
+
 KEYMAP_PACKETS = 9  # announced in the KEYMAP header
 KEYMAP_SENT = 10  # the vendor driver sends 0x2b6 >> 6 = 10 packets
 KEYMAP_SLOTS = KEYMAP_PACKETS * PACKET // 4  # 144 four-byte entries
@@ -198,6 +206,29 @@ def key_colors_payload(colors: dict[int, tuple[int, int, int]]) -> bytes:
     return bytes(buf)
 
 
+def screen_payload(frames: list[tuple[bytes, int]]) -> list[bytes]:
+    """Header [count, delay per frame (ms / 2, at least 1), 0xff...] then the frames, in 4 KiB chunks."""
+    if not 0 < len(frames) <= SCREEN_MAX_FRAMES:
+        raise ProtocolError(f"1-{SCREEN_MAX_FRAMES} frames")
+    header = bytearray(b"\xff" * SCREEN_HEADER)
+    header[0] = len(frames)
+    body = bytearray()
+    for n, (pixels, duration_ms) in enumerate(frames):
+        if len(pixels) != SCREEN_FRAME:
+            raise ProtocolError(f"frame {n} is {len(pixels)} bytes, expected {SCREEN_FRAME}")
+        header[1 + n] = max(1, min(0xFF, duration_ms // 2))
+        body += pixels
+    data = bytes(header) + bytes(body)
+    count = -(-len(data) // SCREEN_CHUNK)
+    data = data.ljust(count * SCREEN_CHUNK, b"\xff")
+    return [data[i : i + SCREEN_CHUNK] for i in range(0, len(data), SCREEN_CHUNK)]
+
+
+class ScreenPipe(Protocol):
+    def write(self, data: bytes) -> int: ...
+    def read(self, size: int, timeout_ms: int) -> bytes: ...
+
+
 class Session:
     """Sends packets with the vendor driver's pacing and acknowledgement checks."""
 
@@ -263,6 +294,28 @@ class Session:
         self.send(command(SAVE))
         self.send(command(FINISH))
         self.set_lighting(Lighting(mode=CUSTOM_MODE, brightness=brightness, speed=MAX_LEVEL))
+
+    def upload_screen(self, frames: list[tuple[bytes, int]], pipe: ScreenPipe | None, slot: int = 1,
+                      progress: Callable[[int, int], None] | None = None) -> None:
+        """Announce the upload on the configuration interface, stream it on the screen interface."""
+        chunks = screen_payload(frames)
+        self.send(command(START))
+        header = bytearray(command(SCREEN, byte2=slot))
+        header[8:10] = len(chunks).to_bytes(2, "little")
+        self.send(bytes(header))
+        for n, chunk in enumerate(chunks):
+            if self.dry_run or pipe is None:
+                if n == 0 or n == len(chunks) - 1:
+                    self.log(f"[dry-run if={SCREEN_INTERFACE} output] chunk {n + 1}/{len(chunks)}: "
+                             f"{chunk[:16].hex(' ')} ...")
+                continue
+            written = pipe.write(b"\x00" + chunk)
+            if written < 0:
+                raise ProtocolError(f"screen chunk {n + 1}/{len(chunks)} was not accepted")
+            pipe.read(64, 300)  # the vendor driver waits for the keyboard's reply
+            if progress:
+                progress(n + 1, len(chunks))
+        self.send(command(SAVE))
 
     def sync_time(self, when: datetime | None = None) -> None:
         self.send(command(START))

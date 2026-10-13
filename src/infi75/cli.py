@@ -264,12 +264,48 @@ def cmd_remap(args) -> int:
     return 0
 
 
+def _screen_pipe(vid: int, pid: int):
+    """hidraw handle on the screen interface (0xFF68), which the kernel HID driver serves."""
+    from . import hfd
+    from .transport import _hid
+
+    for interface in enumerate_interfaces(vid, pid):
+        if interface.interface == hfd.SCREEN_INTERFACE:
+            device = _hid().device()
+            device.open_path(interface.path)
+            return device
+    raise DeviceError(f"screen interface {hfd.SCREEN_INTERFACE} not found")
+
+
+def _upload_screen_hfd(args) -> int:
+    from . import hfd, screen
+
+    frames = screen.frames_from_file(args.path, hfd.SCREEN_WIDTH, hfd.SCREEN_HEIGHT,
+                                     hfd.SCREEN_MAX_FRAMES, fit=args.fit)
+    print(f"{len(frames)} frame(s) of {hfd.SCREEN_WIDTH}x{hfd.SCREEN_HEIGHT}", file=sys.stderr)
+    prof, session, link = _hfd_session(args)
+    if link is None:
+        session.upload_screen(frames, None, slot=args.slot)
+        return 0
+    vid = args.vid if args.vid is not None else prof.vendor_id
+    pid = args.pid if args.pid is not None else prof.product_ids[0]
+    pipe = _screen_pipe(vid, pid)
+    try:
+        with link:
+            session.upload_screen(frames, pipe, slot=args.slot,
+                                  progress=lambda n, total: print(f"\r{n}/{total}", end="", file=sys.stderr))
+        print(file=sys.stderr)
+    finally:
+        pipe.close()
+    return 0
+
+
 def cmd_screen(args) -> int:
     if _is_hfd(args):
         if args.screen_cmd == "time":
             when = datetime.fromisoformat(args.at) if args.at else None
             return _run_hfd(args, lambda s: s.sync_time(when))
-        raise DeviceError("screen image upload is not implemented for this keyboard yet")
+        return _upload_screen_hfd(args)
     kb = _keyboard(args)
     if args.screen_cmd == "image":
         width, height = args.size if args.size else (None, None)
@@ -540,9 +576,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     scr = sub.add_parser("screen", help="built-in display")
     scr_sub = scr.add_subparsers(dest="screen_cmd", required=True)
-    p = scr_sub.add_parser("image", help="upload an image")
+    p = scr_sub.add_parser("image", help="upload an image or animated GIF")
     p.add_argument("path")
-    p.add_argument("--size", type=parse_size, help="screen resolution WxH (overrides profile)")
+    p.add_argument("--size", type=parse_size, help="screen resolution WxH (Royuan boards)")
+    p.add_argument("--fit", choices=["crop", "stretch", "pad"], default="crop",
+                   help="how to fit the image to the 135x240 screen (INFI75)")
+    p.add_argument("--slot", type=int, default=1, help="screen slot written by the upload (INFI75, default 1)")
     p = scr_sub.add_parser("time", help="sync the screen clock")
     p.add_argument("--at", help="ISO timestamp instead of now")
     scr.set_defaults(func=cmd_screen)
