@@ -71,3 +71,8 @@ def test_replay_pads_text_and_prefixes_captured_report_id_zero(capsys, tmp_path)
     path.write_text("# interface 1\n07 01\n# interface 2\n28 00\n")
     code, out = run(capsys, "replay", str(path))
     assert code == 0 and "[dry-run if=1 feature]" in out.err and "[dry-run if=2 feature]" in out.err
+
+
+def test_missing_capture_file_is_an_error(capsys, tmp_path):
+    code = cli.main(["capture", "analyze", str(tmp_path / "missing.pcapng")])
+    assert code == 2 and "No such file" in capsys.readouterr().err

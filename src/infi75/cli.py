@@ -376,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (DeviceError, capture.CaptureError, KeyError, ValueError) as exc:
+    except (DeviceError, capture.CaptureError, KeyError, ValueError, OSError) as exc:
         message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         print(f"error: {message}", file=sys.stderr)
         return 2
