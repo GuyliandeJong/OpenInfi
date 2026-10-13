@@ -1,6 +1,6 @@
 import struct
 
-from infi75 import capture
+from openinfi import capture
 
 FEATURE_PAYLOAD = bytes.fromhex("07020404170ac81ee7") + bytes(55)
 

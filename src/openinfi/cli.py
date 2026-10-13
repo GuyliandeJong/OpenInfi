@@ -1,4 +1,4 @@
-"""Command-line interface: ``infi75 <command> ...``."""
+"""Command-line interface: ``openinfi <command> ...``."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def cmd_remap(args) -> int:
         state = {}
     else:
         if not args.key or not args.to:
-            raise ValueError("usage: infi75 remap [--fn] KEY TARGET  (or --reset / --list)")
+            raise ValueError("usage: openinfi remap [--fn] KEY TARGET  (or --reset / --list)")
         state = board.remap(args.key, args.to, layer)
     for name, target in sorted(state.items()):
         print(f"{prefix}{name} -> {target}")
@@ -182,10 +182,10 @@ def cmd_macro(args) -> int:
         for n, item in enumerate(macros):
             print(f"{n:3d}  {item['name']:20s} {macro.describe(macro.parse(item['sequence']))}")
         if not macros:
-            print("no macros ('infi75 macro save NAME \"ctrl+c 50ms enter\"' adds one)")
+            print("no macros ('openinfi macro save NAME \"ctrl+c 50ms enter\"' adds one)")
     elif args.macro_cmd == "save":
         board.save_macro(args.name, args.sequence)
-        print(f"saved macro '{args.name}'; assign it with: infi75 remap KEY 'macro:{args.name}'")
+        print(f"saved macro '{args.name}'; assign it with: openinfi remap KEY 'macro:{args.name}'")
     elif args.macro_cmd == "delete":
         board.delete_macro(args.name)
         print(f"deleted macro '{args.name}'")
@@ -200,7 +200,7 @@ def cmd_setup(args) -> int:
             saved = board.load_setup(name)
             print(f"{name:24s} saved {saved.get('saved', '?')}  ({', '.join(saved.get('parts', {}))})")
         if not names:
-            print("no saved setups ('infi75 setup save NAME' saves the current one)")
+            print("no saved setups ('openinfi setup save NAME' saves the current one)")
     elif args.setup_cmd == "save":
         path = board.save_setup(args.name)
         print(f"saved setup '{args.name}' ({path})")
@@ -237,7 +237,7 @@ def cmd_clock(args) -> int:
         print(f"installed {clock.SERVICE} and {clock.TIMER} in {folder}")
         print(f"the clock is synced 30 s after login and every {clock.check_interval(args.every)}")
         print("to also sync on plug-in, install the current udev rule: "
-              "infi75 udev | sudo tee /etc/udev/rules.d/70-infi75.rules")
+              "openinfi udev | sudo tee /etc/udev/rules.d/70-openinfi.rules")
     elif args.clock_cmd == "uninstall":
         clock.uninstall()
         print("automatic clock sync removed")
@@ -245,7 +245,7 @@ def cmd_clock(args) -> int:
         if clock.installed():
             print(f"automatic sync: on, every {clock.interval()} and on plug-in (units in {clock.unit_dir()})")
         else:
-            print("automatic sync: off ('infi75 clock install' turns it on)")
+            print("automatic sync: off ('openinfi clock install' turns it on)")
     return 0
 
 
@@ -395,7 +395,7 @@ def cmd_probe(args) -> int:
                 print("  reading undeclared feature report 0 (read-only)")
                 probe.read_features(hid, node.path.encode(), [0], log)
         except OSError as exc:
-            print(f"  cannot open {node.path}: {exc} (install the udev rule: 'infi75 udev')")
+            print(f"  cannot open {node.path}: {exc} (install the udev rule: 'openinfi udev')")
     if args.online:
         print("\nresult: " + ("keyboard answered the 'online' protocol" if answered
                                else "no 'online' reply; paste this output for analysis"))
@@ -446,7 +446,7 @@ def cmd_udev(args) -> int:
     else:
         rule = udev_rule(prof.vendor_id, prof.product_ids)
     sys.stdout.write(rule)
-    print("# save as /etc/udev/rules.d/70-infi75.rules, then: sudo udevadm control --reload && "
+    print("# save as /etc/udev/rules.d/70-openinfi.rules, then: sudo udevadm control --reload && "
           "sudo udevadm trigger", file=sys.stderr)
     return 0
 
@@ -456,10 +456,10 @@ def cmd_desktop(args) -> int:
 
     if args.desktop_cmd == "install":
         entry = desktop.install()
-        print(f"added 'INFI75 Configurator' to the app menu ({entry})")
+        print(f"added 'OpenInfi' to the app menu ({entry})")
     else:
         desktop.uninstall()
-        print("removed 'INFI75 Configurator' from the app menu")
+        print("removed 'OpenInfi' from the app menu")
     return 0
 
 
@@ -473,7 +473,7 @@ def cmd_gui(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="infi75", description="Configure the Infiverse INFI75 keyboard.")
+    parser = argparse.ArgumentParser(prog="openinfi", description="OpenInfi: open-source configurator for the Infiverse INFI75 keyboard.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--profile", help="keyboard profile JSON (default: bundled INFI75 profile)")
     parser.add_argument("--vid", type=_int, help="override USB vendor id (default 0x05ac)")
@@ -494,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     rgb = sub.add_parser("rgb", help="lighting")
     rgb_sub = rgb.add_subparsers(dest="rgb_cmd", required=True)
     p = rgb_sub.add_parser("mode", help="set the global lighting effect")
-    p.add_argument("mode", help="effect name or number; 'infi75 rgb effects' lists them")
+    p.add_argument("mode", help="effect name or number; 'openinfi rgb effects' lists them")
     p.add_argument("--color", type=parse_color, default=(255, 255, 255))
     p.add_argument("--speed", type=int, default=3, help="0-5")
     p.add_argument("--brightness", type=int, default=4, help="0-5")
@@ -512,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
     rgb.set_defaults(func=cmd_rgb)
 
     p = sub.add_parser("remap", help="make a key send a different key code")
-    p.add_argument("key", nargs="?", help="physical key (profile name, or #index); 'infi75 keys' lists them")
+    p.add_argument("key", nargs="?", help="physical key (profile name, or #index); 'openinfi keys' lists them")
     p.add_argument("to", nargs="?",
                    help="target: key name (esc, f13, 0x29), combination (ctrl+c), media key "
                         "(volup, voldown, mute, playpause, next, prev, stop), macro:NAME (macro:NAMEx3 "

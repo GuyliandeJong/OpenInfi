@@ -10,7 +10,7 @@ def run(args) -> int:
         from .ui.app import run as run_app
     except ImportError as exc:
         raise DeviceError(
-            f"the GUI needs PySide6 ({exc}). Install it with: pip install 'infi75[gui]' "
+            f"the GUI needs PySide6 ({exc}). Install it with: pip install 'openinfi[gui]' "
             "(or: sudo pacman -S pyside6)"
         ) from None
     return run_app(args)

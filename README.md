@@ -1,12 +1,12 @@
-# INFI75 Configurator
+# OpenInfi
 
-An open-source configurator for the **Infiverse INFI75** keyboard on Linux.
+**OpenInfi** is an open-source configurator for the **Infiverse INFI75** keyboard on Linux.
 
 Change the lighting, paint every key, remap keys and the Fn layer, record macros, put your own picture or GIF on the built-in screen and keep its clock right, all without the Windows-only vendor software. It also works on INFI75 keyboards that the official driver and the Epomaker web hub cannot connect to.
 
 ## Preview
 
-![INFI75 Configurator](screenshots/key-colours.png)
+![OpenInfi](screenshots/key-colours.png)
 
 ## Features
 
@@ -85,7 +85,7 @@ The Device page shows the connection, firmware and whether both keyboard channel
 
 ### Command Line
 
-Everything in the app is also available as `infi75` commands, for scripts and key bindings. See [Command Line](#command-line-1) below.
+Everything in the app is also available as `openinfi` commands, for scripts and key bindings. See [Command Line](#command-line-1) below.
 
 ## Status
 
@@ -93,9 +93,9 @@ Everything in the app is also available as `infi75` commands, for scripts and ke
 | --- | --- |
 | Lighting, key colours, key remapping, screen pictures and GIFs, clock | Working, tested on an INFI75-1.2 |
 | Fn layer, macros, game mode, sleep timer | Built from the official driver's protocol; not yet tested on the keyboard |
-| Reading the current colours back from the keyboard (`infi75 rgb read`) | Experimental |
+| Reading the current colours back from the keyboard (`openinfi rgb read`) | Experimental |
 
-Reports from other INFI75 owners are welcome: open an issue with the output of `infi75 probe --usb 3`.
+Reports from other INFI75 owners are welcome: open an issue with the output of `openinfi probe --usb 3`.
 
 ## Requirements
 
@@ -109,13 +109,13 @@ Reports from other INFI75 owners are welcome: open an issue with the output of `
 ### Arch Linux / CachyOS (recommended)
 
 ```bash
-git clone https://github.com/GuyliandeJong/Infi75.git
-cd Infi75/packaging/arch
+git clone https://github.com/GuyliandeJong/OpenInfi.git
+cd OpenInfi/packaging/arch
 makepkg -si
 sudo pacman -S --needed pyside6
 ```
 
-This installs the `infi75` command, **INFI75 Configurator** in the application menu, the permission rule and the clock sync. Unplug and replug the keyboard once afterwards.
+This installs the `openinfi` command, **OpenInfi** in the application menu, the permission rule and the clock sync. Unplug and replug the keyboard once afterwards.
 
 Update later with `git pull` and `makepkg -si` in the same folder.
 
@@ -131,8 +131,8 @@ sudo apt install python3-venv libusb-1.0-0     # Debian / Ubuntu
 Clone the repository and install:
 
 ```bash
-git clone https://github.com/GuyliandeJong/Infi75.git
-cd Infi75
+git clone https://github.com/GuyliandeJong/OpenInfi.git
+cd OpenInfi
 python -m venv .venv
 source .venv/bin/activate          # fish: source .venv/bin/activate.fish
 pip install '.[gui]'
@@ -141,57 +141,71 @@ pip install '.[gui]'
 Give your user access to the keyboard (once), then unplug and replug it:
 
 ```bash
-infi75 udev | sudo tee /etc/udev/rules.d/70-infi75.rules
+openinfi udev | sudo tee /etc/udev/rules.d/70-openinfi.rules
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
 Optionally add the app to the application menu and turn on automatic clock sync:
 
 ```bash
-infi75 desktop install
-infi75 clock install
+openinfi desktop install
+openinfi clock install
 ```
 
 ### Start
 
 ```bash
-infi75 gui
+openinfi gui
 ```
+
+## Upgrading from infi75
+
+OpenInfi was called `infi75` before. After updating, your saved settings move from `~/.config/infi75` to `~/.config/openinfi` by themselves. Replace the old permission rule, clock sync and menu entry once:
+
+```bash
+sudo rm -f /etc/udev/rules.d/70-infi75.rules
+openinfi udev | sudo tee /etc/udev/rules.d/70-openinfi.rules
+sudo udevadm control --reload && sudo udevadm trigger
+openinfi clock install        # also removes the old infi75 clock units
+openinfi desktop install      # also removes the old menu entry
+```
+
+With the Arch package, `makepkg -si` replaces the old `infi75` package; only remove the hand-installed rule in `/etc/udev/rules.d/`.
 
 ## Command Line
 
 ```bash
-infi75 rgb effects                                  # list effects
-infi75 rgb mode static --color "#ff8800" --brightness 5
-infi75 rgb mode spectrum --rainbow --speed 4
-infi75 rgb mode off
-infi75 rgb all purple                               # every key one colour
-infi75 rgb keys W=red A=red S=red D=red --default 0,0,40
+openinfi rgb effects                                  # list effects
+openinfi rgb mode static --color "#ff8800" --brightness 5
+openinfi rgb mode spectrum --rainbow --speed 4
+openinfi rgb mode off
+openinfi rgb all purple                               # every key one colour
+openinfi rgb keys W=red A=red S=red D=red --default 0,0,40
 
-infi75 keys                                         # key names
-infi75 remap CAPS esc
-infi75 remap RALT ctrl+c
-infi75 remap F12 volup                              # volup voldown mute playpause next prev stop
-infi75 remap --fn F1 mute                           # Fn + F1
-infi75 remap CAPS default                           # restore one key
-infi75 remap --list
-infi75 remap --reset                                # restore all keys (--fn for the Fn layer)
+openinfi keys                                         # key names
+openinfi remap CAPS esc
+openinfi remap RALT ctrl+c
+openinfi remap F12 volup                              # volup voldown mute playpause next prev stop
+openinfi remap --fn F1 mute                           # Fn + F1
+openinfi remap CAPS default                           # restore one key
+openinfi remap --list
+openinfi remap --reset                                # restore all keys (--fn for the Fn layer)
 
-infi75 macro save sig "text:Kind_regards enter"     # _ types a space
-infi75 remap F9 macro:sig                           # macro:sigx3 plays it 3 times
+openinfi macro save sig "text:Kind_regards enter"     # _ types a space
+openinfi remap F9 macro:sig                           # macro:sigx3 plays it 3 times
 
-infi75 screen image wallpaper.png                   # --fit crop (default) | pad | stretch
-infi75 screen image animation.gif
-infi75 clock sync
-infi75 clock install --every 1h                     # automatic sync; 'clock status', 'clock uninstall'
+openinfi screen image wallpaper.png                   # --fit crop (default) | pad | stretch
+openinfi screen image animation.gif
+openinfi clock sync
+openinfi clock install --every 1h                     # automatic sync; 'clock status', 'clock uninstall'
 
-infi75 system --game-mode on --block win,altf4
-infi75 system --sleep 3
-infi75 setup save Gaming
-infi75 setup apply Work
+openinfi system --game-mode on --block win,altf4
+openinfi system --sleep 3
+openinfi setup save Gaming
+openinfi setup apply Work
 
-infi75 --dry-run rgb all red                        # print the data, send nothing
-infi75 --trace remap A d                            # send, and print every packet and reply
+openinfi --dry-run rgb all red                        # print the data, send nothing
+openinfi --trace remap A d                            # send, and print every packet and reply
 ```
 
 Colours can be names (`red`, `orange`, `purple`, `off`, ...), `#rrggbb` or `r,g,b`.
@@ -213,9 +227,9 @@ The full protocol is documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 | The app says "Bluetooth only" | Connect the cable and switch the keyboard to wired mode. |
 | `the GUI needs PySide6` | `pip install '.[gui]'` in the project folder, or `sudo pacman -S pyside6`. |
 | `warning: no confirmation for 04 02` | The keyboard was still saving; the setting is normally applied anyway. |
-| Automatic clock sync does nothing | `journalctl --user -u infi75-clock`; reinstall the permission rule after updating. |
+| Automatic clock sync does nothing | `journalctl --user -u openinfi-clock`; reinstall the permission rule after updating. |
 
-Settings this tool has written are remembered in `~/.config/infi75/`.
+Settings this tool has written are remembered in `~/.config/openinfi/`.
 
 ## Safety
 
@@ -233,8 +247,8 @@ The tests need no keyboard. GitHub Actions runs them, plus `pyflakes`, on Python
 ## Project Structure
 
 ```text
-Infi75/
-├── src/infi75/
+OpenInfi/
+├── src/openinfi/
 │   ├── hfd.py              INFI75 protocol: packet builders and the session
 │   ├── board.py            keyboard operations shared by the app and the command line
 │   ├── usbctl.py           libusb access to the settings interface
@@ -260,13 +274,13 @@ Done so far: lighting, key colours, remapping, Fn layer, macros, screen pictures
 Next, roughly in this order:
 
 1. Confirm the Fn layer, macros, game mode and sleep timer on the keyboard
-2. Show the keyboard's current colours in the app (`infi75 rgb read`)
+2. Show the keyboard's current colours in the app (`openinfi rgb read`)
 3. An AUR package
 4. More INFI75 layouts (ISO) and revisions
 
 ## Support
 
-If you find INFI75 Configurator useful and would like to support its development:
+If you find OpenInfi useful and would like to support its development:
 
 [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/guyliandejong)
 
@@ -278,4 +292,4 @@ Protocol knowledge builds on [gohv/EPOMAKER-Ajazz-AK820-Pro](https://github.com/
 
 MIT License, see [LICENSE](LICENSE).
 
-INFI75 Configurator is an independent project and is not affiliated with or endorsed by Infiverse or Epomaker. No vendor software or firmware is included.
+OpenInfi is an independent project and is not affiliated with or endorsed by Infiverse or Epomaker. No vendor software or firmware is included.

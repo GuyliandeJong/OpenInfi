@@ -1228,7 +1228,7 @@ class DevicePage(Page):
     check_requested = Signal()
     simulate_toggled = Signal(bool)
 
-    UDEV_COMMAND = ("infi75 udev | sudo tee /etc/udev/rules.d/70-infi75.rules && "
+    UDEV_COMMAND = ("openinfi udev | sudo tee /etc/udev/rules.d/70-openinfi.rules && "
                     "sudo udevadm control --reload && sudo udevadm trigger")
 
     def __init__(self, profile, simulate: bool) -> None:

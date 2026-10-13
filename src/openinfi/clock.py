@@ -3,11 +3,11 @@
 The INFI75 clock drifts and has no way to fetch the time itself, so the
 computer has to set it. ``install()`` writes two user units:
 
-* ``infi75-clock.service`` runs ``infi75 clock sync --if-present`` once;
-* ``infi75-clock.timer`` starts it shortly after login and then at a fixed
+* ``openinfi-clock.service`` runs ``openinfi clock sync --if-present`` once;
+* ``openinfi-clock.timer`` starts it shortly after login and then at a fixed
   interval.
 
-The udev rule from ``infi75 udev`` additionally asks the user's systemd
+The udev rule from ``openinfi udev`` additionally asks the user's systemd
 instance to start the service whenever the keyboard is plugged in or
 switched to wired mode (``ENV{SYSTEMD_USER_WANTS}``, see systemd.device(5)).
 """
@@ -21,8 +21,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-SERVICE = "infi75-clock.service"
-TIMER = "infi75-clock.timer"
+SERVICE = "openinfi-clock.service"
+TIMER = "openinfi-clock.timer"
+LEGACY_UNITS = ("infi75-clock.timer", "infi75-clock.service")  # the project's former name
 DEFAULT_EVERY = "6h"
 
 
@@ -32,14 +33,14 @@ def unit_dir() -> Path:
 
 
 def executable() -> str:
-    """Absolute path of the ``infi75`` command, so the units work outside the virtual environment."""
-    sibling = Path(sys.executable).parent / "infi75"  # the script of this (virtual) environment
+    """Absolute path of the ``openinfi`` command, so the units work outside the virtual environment."""
+    sibling = Path(sys.executable).parent / "openinfi"  # the script of this (virtual) environment
     if sibling.exists():
         return str(sibling.absolute())
-    found = shutil.which("infi75")
+    found = shutil.which("openinfi")
     if found:
         return str(Path(found).absolute())
-    return f"{sys.executable} -m infi75"
+    return f"{sys.executable} -m openinfi"
 
 
 def check_interval(every: str) -> str:
@@ -94,12 +95,28 @@ def install(every: str = DEFAULT_EVERY, command: str | None = None) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     (folder / SERVICE).write_text(service_text(command or executable()))
     (folder / TIMER).write_text(timer_text(every))
+    remove_legacy()
     _systemctl("daemon-reload")
     _systemctl("enable", "--now", TIMER)
     return folder
 
 
+def remove_legacy() -> bool:
+    """Stop and delete clock units installed under the former name (infi75). Returns True if any were found."""
+    folder = unit_dir()
+    found = [name for name in LEGACY_UNITS if (folder / name).exists()]
+    if LEGACY_UNITS[0] in found:
+        try:
+            _systemctl("disable", "--now", LEGACY_UNITS[0])
+        except RuntimeError:
+            pass
+    for name in found:
+        (folder / name).unlink(missing_ok=True)
+    return bool(found)
+
+
 def uninstall() -> None:
+    remove_legacy()
     folder = unit_dir()
     if (folder / TIMER).exists():
         try:

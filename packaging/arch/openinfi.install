@@ -2,8 +2,8 @@ post_install() {
   udevadm control --reload 2>/dev/null
   udevadm trigger --subsystem-match=usb --subsystem-match=hidraw 2>/dev/null
   echo ">>> Replug the INFI75 (wired mode) once so the permission rule applies."
-  echo ">>> Automatic clock sync:  systemctl --user enable --now infi75-clock.timer"
-  echo ">>> If you installed /etc/udev/rules.d/70-infi75.rules by hand, remove it;"
+  echo ">>> Automatic clock sync:  systemctl --user enable --now openinfi-clock.timer"
+  echo ">>> If you installed /etc/udev/rules.d/70-openinfi.rules or 70-infi75.rules by hand, remove it;"
   echo ">>> it overrides the packaged rule in /usr/lib/udev/rules.d."
 }
 

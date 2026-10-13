@@ -45,7 +45,7 @@ class UsbHid:
         except NotImplementedError:
             pass
         except usb.core.USBError as exc:
-            raise UsbError(f"cannot access the device: {exc} (install the udev rule: 'infi75 udev')") from exc
+            raise UsbError(f"cannot access the device: {exc} (install the udev rule: 'openinfi udev')") from exc
 
     def __enter__(self) -> "UsbHid":
         try:

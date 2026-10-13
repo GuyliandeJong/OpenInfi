@@ -1,7 +1,7 @@
 import pytest
 
-from infi75 import cli, clock, hfd
-from infi75.transport import udev_rule
+from openinfi import cli, clock, hfd
+from openinfi.transport import udev_rule
 
 
 @pytest.fixture
@@ -14,10 +14,10 @@ def units(tmp_path, monkeypatch):
 
 def test_install_writes_units_and_enables_timer(units):
     folder, calls = units
-    clock.install("1h", command="/opt/venv/bin/infi75")
+    clock.install("1h", command="/opt/venv/bin/openinfi")
     service = (folder / clock.SERVICE).read_text()
     timer = (folder / clock.TIMER).read_text()
-    assert "ExecStart=/opt/venv/bin/infi75 clock sync --if-present --wait 10" in service
+    assert "ExecStart=/opt/venv/bin/openinfi clock sync --if-present --wait 10" in service
     assert "OnUnitActiveSec=1h" in timer and "OnStartupSec=30s" in timer
     assert ("enable", "--now", clock.TIMER) in calls
     assert clock.installed() and clock.interval() == "1h"
@@ -35,7 +35,7 @@ def test_udev_rule_starts_clock_service_on_plug_in():
     rule = udev_rule(0x05AC, [0x024F])
     line = next(l for l in rule.splitlines() if "SYSTEMD_USER_WANTS" in l)
     assert 'ATTR{product}=="INFI75*"' in line
-    assert 'TAG+="systemd"' in line and 'ENV{SYSTEMD_USER_WANTS}+="infi75-clock.service"' in line
+    assert 'TAG+="systemd"' in line and 'ENV{SYSTEMD_USER_WANTS}+="openinfi-clock.service"' in line
 
 
 def test_sync_without_save_skips_save(capsys):
@@ -60,3 +60,23 @@ def test_clock_sync_dry_run(capsys):
     out = capsys.readouterr()
     assert "keyboard clock set to 2026-10-13 09:41:07" in out.out
     assert "04 28" in out.err and "04 02" in out.err
+
+
+def test_install_removes_units_of_the_former_name(units):
+    folder, calls = units
+    folder.mkdir(parents=True)
+    (folder / "infi75-clock.timer").write_text("[Timer]\n")
+    (folder / "infi75-clock.service").write_text("[Service]\n")
+    clock.install(command="/usr/bin/openinfi")
+    assert not (folder / "infi75-clock.timer").exists() and not (folder / "infi75-clock.service").exists()
+    assert ("disable", "--now", "infi75-clock.timer") in calls
+
+
+def test_config_folder_of_the_former_name_is_moved(tmp_path, monkeypatch):
+    from openinfi import board
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    (tmp_path / "infi75").mkdir()
+    (tmp_path / "infi75" / "keymap.json").write_text('{"A": "d"}')
+    assert board.config_dir() == tmp_path / "openinfi"
+    assert (tmp_path / "openinfi" / "keymap.json").exists() and not (tmp_path / "infi75").exists()

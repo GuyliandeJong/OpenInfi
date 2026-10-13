@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from infi75 import cli, hfd
+from openinfi import cli, hfd
 
 
 class FakeLink:
@@ -146,7 +146,7 @@ def test_remap_cli_accumulates_and_resets(tmp_path, monkeypatch, capsys):
             pass
 
     link = Link()
-    monkeypatch.setattr("infi75.usbctl.UsbHid", lambda *a, **k: link)
+    monkeypatch.setattr("openinfi.usbctl.UsbHid", lambda *a, **k: link)
     assert cli.main(["remap", "CAPS", "lctrl"]) == 0
     assert cli.main(["remap", "F12", "volup"]) == 0
     table = b"".join(p for p in link.sent[-12:-2])
@@ -155,7 +155,7 @@ def test_remap_cli_accumulates_and_resets(tmp_path, monkeypatch, capsys):
     assert cli.main(["remap", "--reset"]) == 0
     table = b"".join(p for p in link.sent[-12:-2])
     assert not any(table[:574])
-    assert (tmp_path / "infi75" / "keymap.json").read_text().strip() == "{}"
+    assert (tmp_path / "openinfi" / "keymap.json").read_text().strip() == "{}"
 
 
 def test_key_colors_transaction():
@@ -219,7 +219,7 @@ def test_upload_screen_sequence():
 def test_frames_from_file_little_endian_portrait(tmp_path):
     from PIL import Image
 
-    from infi75 import screen
+    from openinfi import screen
 
     path = tmp_path / "red.png"
     Image.new("RGB", (240, 135), (255, 0, 0)).save(path)
@@ -228,8 +228,8 @@ def test_frames_from_file_little_endian_portrait(tmp_path):
 
 
 def test_board_saves_and_reloads_key_colours(tmp_path, monkeypatch):
-    from infi75 import board as board_mod
-    from infi75 import profile as profiles
+    from openinfi import board as board_mod
+    from openinfi import profile as profiles
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
 
@@ -240,7 +240,7 @@ def test_board_saves_and_reloads_key_colours(tmp_path, monkeypatch):
         def __exit__(self, *exc):
             pass
 
-    monkeypatch.setattr("infi75.usbctl.UsbHid", lambda *a, **k: Link())
+    monkeypatch.setattr("openinfi.usbctl.UsbHid", lambda *a, **k: Link())
     b = board_mod.InfiBoard(profiles.load())
     b.set_key_colors({"esc": (1, 2, 3)}, default=(0, 0, 9))
     assert b.saved_colors() == ({"ESC": (1, 2, 3)}, (0, 0, 9))
@@ -266,8 +266,8 @@ def test_system_packet_matches_vendor_driver():
 
 def test_board_layers_setups_and_reserved_fn_keys(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from infi75 import board as board_mod
-    from infi75 import profile
+    from openinfi import board as board_mod
+    from openinfi import profile
 
     logs = []
     b = board_mod.InfiBoard(profile.load(), dry_run=True, log=logs.append)
@@ -286,7 +286,7 @@ def test_board_layers_setups_and_reserved_fn_keys(tmp_path, monkeypatch, capsys)
 
 
 def test_macro_table_matches_vendor_layout():
-    from infi75 import macro
+    from openinfi import macro
 
     packets, payload = hfd.macro_payload([macro.parse("ctrl+c"), [], macro.parse("a")])
     assert payload[0:4] == bytes([0x90, 0x01, 0, 0])  # first macro right after the 400-byte header
@@ -311,8 +311,8 @@ def test_macro_upload_sequence():
 
 
 def test_macro_parse_and_board_resolution(tmp_path, monkeypatch):
-    from infi75 import board as board_mod
-    from infi75 import macro, profile
+    from openinfi import board as board_mod
+    from openinfi import macro, profile
 
     assert macro.parse("+lshift a -lshift 20ms mouse1") == [
         ("down", 0xE1), ("down", 4), ("up", 4), ("up", 0xE1), ("delay", 20), ("mouse_down", 1), ("mouse_up", 1)]

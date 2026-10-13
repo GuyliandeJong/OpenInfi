@@ -1,7 +1,7 @@
 import pytest
 
-from infi75 import cli, hidkeys
-from infi75 import profile as profiles
+from openinfi import cli, hidkeys
+from openinfi import profile as profiles
 
 
 @pytest.fixture

@@ -117,7 +117,7 @@ COMMAND_NAMES = {START: "start", SAVE: "save", FINISH: "finish", MODE: "lighting
 
 
 def describe(packet: bytes) -> str:
-    """Short description of a captured configuration packet, for 'infi75 capture analyze'."""
+    """Short description of a captured configuration packet, for 'openinfi capture analyze'."""
     if not packet:
         return "empty"
     if packet[0] == 0x04 and len(packet) > 1:

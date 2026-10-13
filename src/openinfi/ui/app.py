@@ -88,7 +88,7 @@ class MainWindow(QMainWindow):
 
         board = self._board()
         colors, default = board.saved_colors()
-        self.setWindowTitle("INFI75 Configurator")
+        self.setWindowTitle("OpenInfi")
         self.resize(1240, 800)
         self.setMinimumSize(1080, 720)
 
@@ -105,11 +105,11 @@ class MainWindow(QMainWindow):
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(0, 20, 0, 16)
         side.setSpacing(4)
-        brand = QLabel("INFI75")
+        brand = QLabel("OpenInfi")
         brand.setObjectName("Brand")
         brand.setContentsMargins(20, 0, 0, 0)
         side.addWidget(brand)
-        sub = QLabel("Keyboard configurator")
+        sub = QLabel("INFI75 configurator")
         sub.setObjectName("BrandSub")
         sub.setContentsMargins(20, 0, 0, 0)
         side.addWidget(sub)
@@ -377,8 +377,8 @@ class MainWindow(QMainWindow):
 
 def run(args) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    app.setApplicationName("INFI75 Configurator")
-    app.setDesktopFileName("infi75")  # matches infi75.desktop, so the task bar shows its icon
+    app.setApplicationName("OpenInfi")
+    app.setDesktopFileName("openinfi")  # matches openinfi.desktop, so the task bar shows its icon
     app.setWindowIcon(QIcon(str(desktop.icon_source())))
     app.setStyle("Fusion")
     app.setStyleSheet(theme.STYLE)

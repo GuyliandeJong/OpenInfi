@@ -21,7 +21,15 @@ from .transport import DeviceError, _hid, enumerate_interfaces
 
 
 def config_dir() -> Path:
-    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "infi75"
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    folder = base / "openinfi"
+    legacy = base / "infi75"  # the project's former name
+    if not folder.exists() and legacy.is_dir():
+        try:
+            legacy.rename(folder)
+        except OSError:
+            return legacy
+    return folder
 
 
 LAYERS = {"base": hfd.KEYMAP, "fn": hfd.FN_KEYMAP}
@@ -257,7 +265,7 @@ class InfiBoard:
             if sep and tail.isdigit():
                 name, count = head, tail
         if name.lower() not in names:
-            raise ValueError(f"no macro named {name!r}; 'infi75 macro list' shows them")
+            raise ValueError(f"no macro named {name!r}; 'openinfi macro list' shows them")
         return names.index(name.lower()), int(count)
 
     def _resolve_macro(self, target: str) -> str:
@@ -473,6 +481,12 @@ class InfiBoard:
             screen_ok = any(i.interface == hfd.SCREEN_INTERFACE
                             for i in enumerate_interfaces(self.vendor_id, self.product_id or 0))
             report["screen"] = (screen_ok, "OK (interface 2)" if screen_ok else "not accessible")
-        rule = Path("/etc/udev/rules.d/70-infi75.rules")
-        report["udev"] = (rule.exists(), "installed" if rule.exists() else "not installed")
+        rule = Path("/etc/udev/rules.d/70-openinfi.rules")
+        legacy = Path("/etc/udev/rules.d/70-infi75.rules")
+        if rule.exists() or Path("/usr/lib/udev/rules.d/70-openinfi.rules").exists():
+            report["udev"] = (True, "installed")
+        elif legacy.exists():
+            report["udev"] = (False, "old version (70-infi75.rules): reinstall it")
+        else:
+            report["udev"] = (False, "not installed")
         return report

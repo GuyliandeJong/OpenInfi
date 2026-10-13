@@ -13,7 +13,7 @@ software and not yet tested.
 | Controller | SONiX SN32F290, vendor platform HFD `RKGK890` (`HFD80CP100`) |
 | Bluetooth name | `INFI75 5.3` |
 | Sources | INFI75 Driver V1.1 (`DeviceDriver.exe`, `mui.dll`, `KeyboardLayout.xml`), hardware tests |
-| Implementation | `src/infi75/hfd.py`, `src/infi75/usbctl.py` |
+| Implementation | `src/openinfi/hfd.py`, `src/openinfi/usbctl.py` |
 
 Related work using the same command family:
 [gohv/EPOMAKER-Ajazz-AK820-Pro](https://github.com/gohv/EPOMAKER-Ajazz-AK820-Pro)
@@ -178,7 +178,7 @@ Modifier bits: `01` LCtrl, `02` LShift, `04` LAlt, `08` LGui, `10` RCtrl,
 `ea` volume down, `e2` mute.
 
 Key slots come from `key_index` in the vendor `KeyboardLayout.xml` (also
-in `src/infi75/profiles/infi75.json`):
+in `src/openinfi/profiles/infi75.json`):
 
 | Row | Keys and slots |
 |---|---|
@@ -199,7 +199,7 @@ built-in Fn function.
 
 `KeyboardLayout.xml` marks Esc, F5, F6, Backspace, `\|`, Win and Fn with
 `fnlayer_disable="1"`; the vendor UI does not let them be changed on the
-Fn layer, and `infi75` refuses them as well.
+Fn layer, and `openinfi` refuses them as well.
 
 ## 4b. Macros (decoded, implemented, not yet confirmed on hardware)
 
@@ -232,7 +232,7 @@ The data is one buffer (at most `0xe00` bytes):
 The driver inserts a 10 ms delay between two events that have no delay
 between them. A key plays macro `nn` through the keymap entry
 `06 nn mm cc`: `mm` is the driver's "macrotype" and `cc` its
-"macrovalue". `infi75` uses `mm` = 1 with `cc` as a repeat count; the
+"macrovalue". `openinfi` uses `mm` = 1 with `cc` as a repeat count; the
 other modes are not decoded.
 
 ## 5. Per-key colours (confirmed)
@@ -334,8 +334,8 @@ A still image is 16 chunks; the 20-frame test GIF was 318 chunks.
 |---|---|---|
 | `04 15` | unknown, with data | not decoded |
 | `04 19` | unknown | not decoded |
-| `04 f5` | live LED read for the driver's light-sync view: byte 8 = 9 gives nine feature reads forming the `[slot, R, G, B]` table of section 5, byte 8 = 3 gives three reads of one brightness byte per slot; the driver then sends `04 02` (function at `0x42da10`) | decoded; `infi75 rgb read` is experimental |
-| screen slots | `04 72` byte 2; the driver always sends 1 | `infi75 screen image --slot 2` untested |
+| `04 f5` | live LED read for the driver's light-sync view: byte 8 = 9 gives nine feature reads forming the `[slot, R, G, B]` table of section 5, byte 8 = 3 gives three reads of one brightness byte per slot; the driver then sends `04 02` (function at `0x42da10`) | decoded; `openinfi rgb read` is experimental |
+| screen slots | `04 72` byte 2; the driver always sends 1 | `openinfi screen image --slot 2` untested |
 | macro modes | keymap entry `06` byte 2 values other than 1 | not decoded |
 
 ## 10. Firmware updaters (warning)

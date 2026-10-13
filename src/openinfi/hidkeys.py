@@ -121,7 +121,7 @@ def code(name: str) -> int:
     try:
         value = int(key, 0)
     except ValueError:
-        raise KeyError(f"unknown key name {name!r}; run 'infi75 keys --hid' for the list") from None
+        raise KeyError(f"unknown key name {name!r}; run 'openinfi keys --hid' for the list") from None
     if not 0 <= value <= 0xFF:
         raise KeyError(f"HID code out of range: {name!r}")
     return value

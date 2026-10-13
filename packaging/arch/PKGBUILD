@@ -1,16 +1,18 @@
 # Builds the package from the git checkout this file lives in:
 #   cd packaging/arch && makepkg -si
-pkgname=infi75
+pkgname=openinfi
+replaces=('infi75')
+conflicts=('infi75')
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="Open-source configurator for the Infiverse INFI75 keyboard (lighting, remapping, screen, clock)"
+pkgdesc="OpenInfi: open-source configurator for the Infiverse INFI75 keyboard (lighting, remapping, macros, screen, clock)"
 arch=('any')
-url="https://github.com/GuyliandeJong/Infi75"
+url="https://github.com/GuyliandeJong/OpenInfi"
 license=('MIT')
 depends=('python' 'python-hidapi' 'python-pillow' 'python-pyusb' 'libusb')
-optdepends=('pyside6: graphical configurator (infi75 gui)')
+optdepends=('pyside6: graphical configurator (openinfi gui)')
 makedepends=('git' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-install=infi75.install
+install=openinfi.install
 
 _root() { realpath "$startdir/../.."; }
 
@@ -22,26 +24,26 @@ pkgver() {
 }
 
 build() {
-  rm -rf "$srcdir/infi75"
-  git -C "$(_root)" archive --format=tar --prefix=infi75/ HEAD | tar -x -C "$srcdir"
-  cd "$srcdir/infi75"
+  rm -rf "$srcdir/openinfi"
+  git -C "$(_root)" archive --format=tar --prefix=openinfi/ HEAD | tar -x -C "$srcdir"
+  cd "$srcdir/openinfi"
   python -m build --wheel --no-isolation
 }
 
 package() {
-  cd "$srcdir/infi75"
+  cd "$srcdir/openinfi"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
   local run=(env PYTHONPATH=src python -c)
   install -d "$pkgdir/usr/lib/udev/rules.d" "$pkgdir/usr/lib/systemd/user" \
     "$pkgdir/usr/share/applications" "$pkgdir/usr/share/icons/hicolor/scalable/apps"
-  PYTHONPATH=src python -m infi75 udev > "$pkgdir/usr/lib/udev/rules.d/70-infi75.rules" 2>/dev/null
-  "${run[@]}" 'from infi75 import clock; print(clock.service_text("/usr/bin/infi75"), end="")' \
-    > "$pkgdir/usr/lib/systemd/user/infi75-clock.service"
-  "${run[@]}" 'from infi75 import clock; print(clock.timer_text(clock.DEFAULT_EVERY), end="")' \
-    > "$pkgdir/usr/lib/systemd/user/infi75-clock.timer"
-  "${run[@]}" 'from infi75 import desktop; print(desktop.entry_text("/usr/bin/infi75"), end="")' \
-    > "$pkgdir/usr/share/applications/infi75.desktop"
-  install -m644 src/infi75/data/infi75.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/infi75.svg"
+  PYTHONPATH=src python -m openinfi udev > "$pkgdir/usr/lib/udev/rules.d/70-openinfi.rules" 2>/dev/null
+  "${run[@]}" 'from openinfi import clock; print(clock.service_text("/usr/bin/openinfi"), end="")' \
+    > "$pkgdir/usr/lib/systemd/user/openinfi-clock.service"
+  "${run[@]}" 'from openinfi import clock; print(clock.timer_text(clock.DEFAULT_EVERY), end="")' \
+    > "$pkgdir/usr/lib/systemd/user/openinfi-clock.timer"
+  "${run[@]}" 'from openinfi import desktop; print(desktop.entry_text("/usr/bin/openinfi"), end="")' \
+    > "$pkgdir/usr/share/applications/openinfi.desktop"
+  install -m644 src/openinfi/data/openinfi.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/openinfi.svg"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

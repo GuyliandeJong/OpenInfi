@@ -46,7 +46,7 @@ class Profile:
         for key in self.keys:
             if key.name.lower() == wanted.lower():
                 return key
-        raise KeyError(f"no key named {name!r} in profile {self.name!r}; run 'infi75 keys'")
+        raise KeyError(f"no key named {name!r} in profile {self.name!r}; run 'openinfi keys'")
 
 
 def _int(value) -> int:
@@ -56,7 +56,7 @@ def _int(value) -> int:
 def load(path: str | Path | None = None) -> Profile:
     """Load a profile from *path*, or the bundled INFI75 profile when *path* is None."""
     if path is None:
-        resource = files("infi75.profiles").joinpath("infi75.json")
+        resource = files("openinfi.profiles").joinpath("infi75.json")
         text, source = resource.read_text(encoding="utf-8"), "builtin:infi75.json"
     else:
         text, source = Path(path).read_text(encoding="utf-8"), str(path)

@@ -1,5 +1,5 @@
-from infi75 import probe
-from infi75.transport import udev_rule
+from openinfi import probe
+from openinfi.transport import udev_rule
 
 # Vendor collection 0xFF68/0x61: 64-byte input, 4096-byte output, no report IDs.
 LCD_DESCRIPTOR = bytes.fromhex(
@@ -98,7 +98,7 @@ class _FakeUsbDevice:
 def test_usb_control_requests(monkeypatch):
     import types
 
-    from infi75 import usbctl
+    from openinfi import usbctl
 
     fake = _FakeUsbDevice()
     usb_mod = types.SimpleNamespace(

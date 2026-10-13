@@ -20,7 +20,7 @@ def app():
 @pytest.fixture
 def window(app, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    from infi75.ui.app import MainWindow
+    from openinfi.ui.app import MainWindow
 
     w = MainWindow(argparse.Namespace(profile=None, vid=None, pid=None, dry_run=True))
     yield w
@@ -68,7 +68,7 @@ def test_effect_controls_follow_the_effect(app, window):
 
 
 def test_key_capture_uses_physical_key(app):
-    from infi75.ui.widgets import target_from_event
+    from openinfi.ui.widgets import target_from_event
 
     ctrl_c = QKeyEvent(QEvent.KeyPress, Qt.Key_C, Qt.ControlModifier, 46 + 8, 0, 0, "c")
     assert target_from_event(ctrl_c) == "ctrl+c"
@@ -79,7 +79,7 @@ def test_key_capture_uses_physical_key(app):
 
 
 def test_describe_target():
-    from infi75.ui.pages import describe_target
+    from openinfi.ui.pages import describe_target
 
     assert describe_target("ctrl+c") == "Ctrl + C"
     assert describe_target("volup") == "Volume up"
