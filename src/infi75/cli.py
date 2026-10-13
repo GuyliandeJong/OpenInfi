@@ -145,7 +145,7 @@ def cmd_rgb(args) -> int:
                         raise ValueError(f"expected KEY=COLOUR, got {item!r}")
                     chosen[prof.key(name).name] = parse_color(color)
                 default = args.default
-            colors = [(key.index, chosen.get(key.name, default)) for key in prof.keys]
+            colors = {key.index: chosen.get(key.name, default) for key in prof.keys}
             return _run_hfd(args, lambda s: s.set_key_colors(colors, brightness=args.brightness))
         if args.rgb_cmd != "mode":
             raise DeviceError(f"'rgb {args.rgb_cmd}' is not implemented for this keyboard yet")

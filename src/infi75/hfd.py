@@ -32,10 +32,11 @@ FINISH = 0xF0
 MODE = 0x13
 TIME = 0x28
 KEYMAP = 0x11  # base layer
-KEY_COLORS = 0x20
+KEY_COLORS_PREVIEW = 0x20  # live preview only; the stored custom colours return
+KEY_COLORS = 0x23  # stored custom colours shown by CUSTOM_MODE
 
-CUSTOM_MODE = 0x80  # shows the per-key colours uploaded with KEY_COLORS
-KEY_COLOR_PACKETS = 8  # 128 entries of [slot, R, G, B]
+CUSTOM_MODE = 0x80
+KEY_COLOR_PACKETS = 9  # 144 slot-indexed entries of [slot, R, G, B], aa 55 at 574
 
 KEYMAP_PACKETS = 9  # announced in the KEYMAP header
 KEYMAP_SENT = 10  # the vendor driver sends 0x2b6 >> 6 = 10 packets
@@ -185,16 +186,15 @@ def keymap_payload(entries: dict[int, bytes]) -> bytes:
     return bytes(buf)
 
 
-def key_colors_payload(colors: list[tuple[int, tuple[int, int, int]]]) -> bytes:
-    """List of [slot, R, G, B] entries, in the order given, zero-padded to 512 bytes."""
+def key_colors_payload(colors: dict[int, tuple[int, int, int]]) -> bytes:
+    """Slot-indexed table: entry n is [n, R, G, B]; aa 55 closes it at bytes 574-575."""
     size = KEY_COLOR_PACKETS * PACKET
-    if len(colors) * 4 > size:
-        raise ProtocolError(f"at most {size // 4} keys")
     buf = bytearray(size)
-    for n, (slot, (r, g, b)) in enumerate(colors):
-        if not 0 < slot <= 0xFF:
+    for slot, (r, g, b) in colors.items():
+        if not 0 < slot < size // 4 - 1:
             raise ProtocolError(f"invalid light slot {slot}")
-        buf[n * 4 : n * 4 + 4] = bytes((slot, r, g, b))
+        buf[slot * 4 : slot * 4 + 4] = bytes((slot, r, g, b))
+    buf[size - 2 : size] = b"\xaa\x55"
     return bytes(buf)
 
 
@@ -253,13 +253,15 @@ class Session:
         self.send(command(SAVE))
         self.send(command(FINISH))
 
-    def set_key_colors(self, colors: list[tuple[int, tuple[int, int, int]]], brightness: int = 5) -> None:
-        """Upload per-key colours, then switch to the custom effect that displays them."""
+    def set_key_colors(self, colors: dict[int, tuple[int, int, int]], brightness: int = 5) -> None:
+        """Store per-key colours and switch to the custom effect that displays them."""
         payload = key_colors_payload(colors)
+        self.send(command(START))
         self.send(command(KEY_COLORS, byte8=KEY_COLOR_PACKETS))
         for offset in range(0, len(payload), PACKET):
             self.send(payload[offset : offset + PACKET], ack=False)
         self.send(command(SAVE))
+        self.send(command(FINISH))
         self.set_lighting(Lighting(mode=CUSTOM_MODE, brightness=brightness, speed=MAX_LEVEL))
 
     def sync_time(self, when: datetime | None = None) -> None:

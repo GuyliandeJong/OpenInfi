@@ -152,21 +152,22 @@ def test_remap_cli_accumulates_and_resets(tmp_path, monkeypatch, capsys):
 
 def test_key_colors_transaction():
     link = FakeLink()
-    hfd.Session(link, delay=0).set_key_colors([(1, (255, 0, 0)), (55, (0, 0, 255))])
+    hfd.Session(link, delay=0).set_key_colors({1: (255, 0, 0), 55: (0, 0, 255)})
     heads = [p[:2].hex() for p in link.sent]
-    assert heads[0] == "0420" and link.sent[0][8] == 8
-    data = b"".join(link.sent[1:9])
-    assert data[:8] == bytes([1, 255, 0, 0, 55, 0, 0, 255]) and not any(data[8:])
-    assert heads[9] == "0402"
-    assert heads[10:] == ["0418", "0413", "80ff", "0402", "04f0"]
-    assert link.sent[12][9:11] == bytes([5, 5])
+    assert heads[:2] == ["0418", "0423"] and link.sent[1][8] == 9
+    data = b"".join(link.sent[2:11])
+    assert len(data) == 576
+    assert data[4:8] == bytes([1, 255, 0, 0]) and data[220:224] == bytes([55, 0, 0, 255])
+    assert data[574:576] == b"\xaa\x55"
+    assert heads[11:13] == ["0402", "04f0"]
+    assert heads[13:] == ["0418", "0413", "80ff", "0402", "04f0"]
+    assert link.sent[15][9:11] == bytes([5, 5])
 
 
-def test_cli_rgb_keys_lists_every_layout_key(capsys):
+def test_cli_rgb_keys_fills_every_layout_slot(capsys):
     assert cli.main(["--dry-run", "rgb", "keys", "ESC=red", "--default", "0,0,10"]) == 0
     lines = [l.split("] ")[1] for l in capsys.readouterr().err.splitlines() if l.startswith("[dry-run")]
-    data = bytes.fromhex("".join(lines[1:9]))
-    entries = [data[i:i + 4] for i in range(0, 78 * 4, 4)]
-    assert entries[0] == bytes([1, 255, 0, 0])  # ESC is first in layout order
-    assert all(e[1:] == bytes([0, 0, 10]) for e in entries[1:])
-    assert not any(data[78 * 4:])
+    data = bytes.fromhex("".join(lines[2:11]))
+    assert data[4:8] == bytes([1, 255, 0, 0])  # ESC, slot 1
+    assert data[55 * 4 : 55 * 4 + 4] == bytes([55, 0, 0, 10])  # CAPS, slot 55
+    assert data[14 * 4 : 14 * 4 + 4] == bytes(4)  # slot 14 has no key
