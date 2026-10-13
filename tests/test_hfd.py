@@ -217,3 +217,22 @@ def test_frames_from_file_little_endian_portrait(tmp_path):
     Image.new("RGB", (240, 135), (255, 0, 0)).save(path)
     (pixels, duration), = screen.frames_from_file(path, 135, 240, 141, fit="stretch")
     assert len(pixels) == hfd.SCREEN_FRAME and pixels[:2] == b"\x00\xf8"
+
+
+def test_board_saves_and_reloads_key_colours(tmp_path, monkeypatch):
+    from infi75 import board as board_mod
+    from infi75 import profile as profiles
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    class Link(FakeLink):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            pass
+
+    monkeypatch.setattr("infi75.usbctl.UsbHid", lambda *a, **k: Link())
+    b = board_mod.InfiBoard(profiles.load())
+    b.set_key_colors({"esc": (1, 2, 3)}, default=(0, 0, 9))
+    assert b.saved_colors() == ({"ESC": (1, 2, 3)}, (0, 0, 9))

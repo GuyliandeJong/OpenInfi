@@ -20,9 +20,16 @@ from .profile import Profile
 from .transport import DeviceError, _hid, enumerate_interfaces
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "infi75"
+
+
 def keymap_state_path() -> Path:
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    return base / "infi75" / "keymap.json"
+    return config_dir() / "keymap.json"
+
+
+def colors_state_path() -> Path:
+    return config_dir() / "colors.json"
 
 
 class InfiBoard:
@@ -74,6 +81,37 @@ class InfiBoard:
         chosen = {self.profile.key(name).name: tuple(rgb) for name, rgb in colors.items()}
         table = {key.index: chosen.get(key.name, tuple(default)) for key in self.profile.keys}
         self._run(lambda s: s.set_key_colors(table, brightness=brightness))
+        if not self.dry_run:
+            path = colors_state_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"default": list(default),
+                                        "keys": {k: list(v) for k, v in sorted(chosen.items())}}, indent=2))
+
+    def saved_colors(self) -> tuple[dict[str, tuple[int, int, int]], tuple[int, int, int]]:
+        """The per-key colours last written by this tool: ({key: rgb}, default)."""
+        try:
+            data = json.loads(colors_state_path().read_text())
+            keys = {k: tuple(v) for k, v in data.get("keys", {}).items()}
+            return keys, tuple(data.get("default", (0, 0, 0)))
+        except (OSError, ValueError):
+            return {}, (0, 0, 0)
+
+    def connection(self) -> str:
+        """'usb' (configurable), 'bluetooth' (connected, not configurable) or 'none'."""
+        try:
+            import usb.core
+
+            if self.product_id is not None and usb.core.find(idVendor=self.vendor_id, idProduct=self.product_id):
+                return "usb"
+        except Exception:  # libusb missing or not accessible
+            pass
+        from . import probe
+
+        try:
+            nodes = probe.linux_nodes(self.vendor_id, self.product_id or 0)
+        except OSError:
+            nodes = []
+        return "bluetooth" if any(n.interface == -1 for n in nodes) else "none"
 
     # -------------------------------------------------------------- keymap
 
