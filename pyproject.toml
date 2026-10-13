@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "infi75"
 version = "0.1.0"
-description = "Open-source configurator for the Infiverse INFI75 keyboard: key remapping, RGB lighting and screen"
+description = "Open-source Linux configurator for the Infiverse INFI75 keyboard: lighting, key colours, remapping, macros and screen"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -14,6 +14,11 @@ dependencies = [
     "Pillow>=10",
     "pyusb>=1.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/GuyliandeJong/Infi75"
+Issues = "https://github.com/GuyliandeJong/Infi75/issues"
+Funding = "https://ko-fi.com/guyliandejong"
 
 [project.optional-dependencies]
 gui = ["PySide6>=6.6"]
