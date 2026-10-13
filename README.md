@@ -227,9 +227,12 @@ The full protocol is documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 ## Development
 
 ```console
-pip install -e ".[dev]"
-pytest
+pip install -e ".[gui,dev]"
+QT_QPA_PLATFORM=offscreen pytest
 ```
+
+GitHub Actions runs the same tests and `pyflakes` on Python 3.10, 3.12
+and 3.13 for every push (`.github/workflows/tests.yml`).
 
 | Module | Role |
 |---|---|
