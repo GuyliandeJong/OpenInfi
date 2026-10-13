@@ -108,6 +108,7 @@ infi75 screen image animation.gif
 infi75 screen time
 
 infi75 --dry-run rgb all red                        # print packets, send nothing
+infi75 --trace remap A d                            # send, and print every packet and reply
 ```
 
 Colours can be names (`red`, `orange`, `purple`, `off`, ...), `#rrggbb`

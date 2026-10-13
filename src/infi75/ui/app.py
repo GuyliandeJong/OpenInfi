@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
 
     def _board(self) -> InfiBoard:
         return InfiBoard(self.profile, self.args.vid, self.args.pid, dry_run=self.simulate,
-                         log=self.bridge.log.emit)
+                         log=self.bridge.log.emit, trace=getattr(self.args, "trace", False))
 
     def set_simulate(self, on: bool) -> None:
         self.simulate = on

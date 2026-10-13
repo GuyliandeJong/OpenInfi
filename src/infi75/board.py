@@ -50,7 +50,7 @@ def _load_json(path: Path, default):
 
 class InfiBoard:
     def __init__(self, profile: Profile, vendor_id: int | None = None, product_id: int | None = None,
-                 dry_run: bool = False, log: Callable[[str], None] | None = None) -> None:
+                 dry_run: bool = False, log: Callable[[str], None] | None = None, trace: bool = False) -> None:
         if profile.protocol != "hfd":
             raise DeviceError(f"profile '{profile.name}' does not use the HFD protocol")
         self.profile = profile
@@ -58,6 +58,7 @@ class InfiBoard:
         self.product_id = product_id if product_id is not None else (
             profile.product_ids[0] if profile.product_ids else None)
         self.dry_run = dry_run
+        self.trace = trace
         self.log = log or (lambda msg: print(msg, file=sys.stderr))
 
     # ------------------------------------------------------------ plumbing
@@ -69,7 +70,7 @@ class InfiBoard:
             raise DeviceError("profile has no product id; pass --pid")
         link = usbctl.UsbHid(self.vendor_id, self.product_id,
                              self.profile.lighting_interface or hfd.CONFIG_INTERFACE)
-        return hfd.Session(link, log=self.log), link
+        return hfd.Session(link, log=self.log, trace=self.trace), link
 
     def _run(self, action) -> None:
         session, link = self._session()

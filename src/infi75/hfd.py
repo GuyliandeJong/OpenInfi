@@ -234,8 +234,9 @@ class Session:
 
     def __init__(self, link: FeatureLink | None, dry_run: bool = False,
                  log: Callable[[str], None] | None = None, delay: float = 0.01,
-                 busy_polls: int = 150, busy_delay: float = 0.02) -> None:
+                 busy_polls: int = 150, busy_delay: float = 0.02, trace: bool = False) -> None:
         self.link = link
+        self.trace = trace
         self.dry_run = dry_run
         self.log = log or (lambda msg: print(msg, file=sys.stderr))
         self.delay = delay
@@ -246,6 +247,8 @@ class Session:
         if self.dry_run or self.link is None:
             self.log(f"[dry-run if={CONFIG_INTERFACE} feature] {packet.hex(' ')}")
             return
+        if self.trace:
+            self.log(f"> {packet.hex(' ')}")
         written = self.link.set_feature(packet)
         if written != len(packet):
             raise ProtocolError(f"keyboard accepted {written} of {len(packet)} bytes")
@@ -257,13 +260,16 @@ class Session:
         # echoed verbatim. The vendor driver ignores the outcome, so a
         # missing confirmation is reported but does not abort.
         reply = self.link.get_feature(0, PACKET)
+        if packet[0] == 0x04:
+            for _ in range(self.busy_polls):
+                if len(reply) > 3 and reply[3] != 0xFF:
+                    break
+                time.sleep(self.busy_delay)
+                reply = self.link.get_feature(0, PACKET)
+        if self.trace:
+            self.log(f"< {bytes(reply).hex(' ')}")
         if packet[0] != 0x04:
             return
-        for _ in range(self.busy_polls):
-            if len(reply) > 3 and reply[3] != 0xFF:
-                break
-            time.sleep(self.busy_delay)
-            reply = self.link.get_feature(0, PACKET)
         if len(reply) < 4 or reply[3] not in (0, 1):
             self.log(f"warning: no confirmation for {packet[:2].hex(' ')}: reply {bytes(reply[:8]).hex(' ')}")
 

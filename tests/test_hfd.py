@@ -71,6 +71,14 @@ def test_missing_confirmation_warns_without_raising():
     assert logs and "no confirmation for 04 18" in logs[0]
 
 
+def test_trace_logs_packets_and_replies():
+    logs = []
+    hfd.Session(FakeLink(), delay=0, log=logs.append, trace=True).send(hfd.command(hfd.START))
+    assert logs[0].startswith("> 04 18 00 00")
+    assert logs[1].startswith("< 04 18 00 01")
+    assert len(logs) == 2
+
+
 def test_data_packet_echo_is_not_checked():
     logs = []
     link = FakeLink(status=0x1A)  # byte 3 of the time packet is the year

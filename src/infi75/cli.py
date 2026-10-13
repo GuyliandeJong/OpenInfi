@@ -91,7 +91,8 @@ def cmd_keys(args) -> int:
 def _board(args):
     from .board import InfiBoard
 
-    return InfiBoard(profiles.load(args.profile), args.vid, args.pid, dry_run=args.dry_run)
+    return InfiBoard(profiles.load(args.profile), args.vid, args.pid, dry_run=args.dry_run,
+                     trace=args.trace)
 
 
 def _is_hfd(args) -> bool:
@@ -440,6 +441,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vid", type=_int, help="override USB vendor id, e.g. 0x3151")
     parser.add_argument("--pid", type=_int, help="select USB product id, e.g. 0x4015")
     parser.add_argument("-n", "--dry-run", action="store_true", help="print packets instead of sending them")
+    parser.add_argument("--trace", action="store_true",
+                        help="print every packet sent to the keyboard (>) and every reply read back (<)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("list", help="list HID interfaces of the keyboard")
