@@ -44,7 +44,7 @@ DIRECTIONS = {"left": 0, "down": 1, "up": 2, "right": 3}
 MAX_LEVEL = 5  # brightness and speed run 0-5
 
 
-class ProtocolError(RuntimeError):
+class ProtocolError(ValueError):
     pass
 
 
@@ -111,11 +111,14 @@ class Session:
     """Sends packets with the vendor driver's pacing and acknowledgement checks."""
 
     def __init__(self, link: FeatureLink | None, dry_run: bool = False,
-                 log: Callable[[str], None] | None = None, delay: float = 0.01) -> None:
+                 log: Callable[[str], None] | None = None, delay: float = 0.01,
+                 busy_polls: int = 50, busy_delay: float = 0.02) -> None:
         self.link = link
         self.dry_run = dry_run
         self.log = log or (lambda msg: print(msg, file=sys.stderr))
         self.delay = delay
+        self.busy_polls = busy_polls
+        self.busy_delay = busy_delay
 
     def send(self, packet: bytes, ack: bool = True) -> None:
         if self.dry_run or self.link is None:
@@ -127,22 +130,20 @@ class Session:
         time.sleep(self.delay)
         if not ack:
             return
-        # The vendor driver reads the status from byte 3 of the echo:
-        # 1 = done, 0xff = busy (it resends once), anything else = failure.
-        for attempt in range(2):
+        # Commands (04 xx) are echoed with a status in byte 3: 1 = done,
+        # 0xff = busy (seen on SAVE while it writes flash). Data packets are
+        # echoed verbatim. The vendor driver ignores the outcome, so a
+        # missing confirmation is reported but does not abort.
+        reply = self.link.get_feature(0, PACKET)
+        if packet[0] != 0x04:
+            return
+        for _ in range(self.busy_polls):
+            if len(reply) > 3 and reply[3] != 0xFF:
+                break
+            time.sleep(self.busy_delay)
             reply = self.link.get_feature(0, PACKET)
-            status = reply[3] if len(reply) > 3 else None
-            if status == 1:
-                return
-            if status == 0xFF and attempt == 0:
-                time.sleep(self.delay)
-                self.link.set_feature(packet)
-                time.sleep(self.delay)
-                continue
-            break
-        raise ProtocolError(
-            f"keyboard did not confirm {packet[:2].hex(' ')}: reply {bytes(reply[:8]).hex(' ')}"
-        )
+        if len(reply) < 4 or reply[3] not in (0, 1):
+            self.log(f"warning: no confirmation for {packet[:2].hex(' ')}: reply {bytes(reply[:8]).hex(' ')}")
 
     def set_lighting(self, settings: Lighting) -> None:
         self.send(command(START))
