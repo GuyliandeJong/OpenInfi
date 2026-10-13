@@ -244,6 +244,9 @@ def cmd_probe(args) -> int:
                 probe.query_online(hid, interface.path, 64, log)
         return 0
 
+    if args.usb is not None:
+        return _probe_usb(args, vid, pids[0] if pids else None)
+
     nodes = [n for pid in pids for n in probe.linux_nodes(vid, pid)] if pids else []
     if args.handshake:
         targets = [n for n in nodes if n.interface == args.interface]
@@ -289,6 +292,43 @@ def cmd_probe(args) -> int:
     if args.online:
         print("\nresult: " + ("keyboard answered the 'online' protocol" if answered
                                else "no 'online' reply; paste this output for analysis"))
+    return 0
+
+
+def _probe_usb(args, vid: int, pid: int | None) -> int:
+    """Talk to an interface through control transfers (works without a HID driver)."""
+    from . import probe, usbctl
+
+    if pid is None:
+        print("pass --pid")
+        return 1
+    with usbctl.UsbHid(vid, pid, args.usb) as dev:
+        print(f"interface {args.usb} via libusb control transfers")
+        try:
+            desc = dev.report_descriptor()
+            print(f"  report descriptor ({len(desc)} bytes): {desc.hex(' ')}")
+            for col in probe.parse_report_descriptor(desc):
+                sizes = ", ".join(f"{k}[id {r}]={n}B" for (k, r), n in sorted(col.reports.items()))
+                print(f"  collection usage_page=0x{col.usage_page:04x} usage=0x{col.usage:02x}: {sizes or '-'}")
+        except Exception as exc:  # pyusb raises USBError subclasses and timeouts
+            print(f"  report descriptor: {exc}")
+        try:
+            data = dev.get_feature(0, 64)
+            print(f"  GET_FEATURE id=0: {data.hex(' ')}")
+        except Exception as exc:
+            print(f"  GET_FEATURE id=0: {exc}")
+        if args.handshake:
+            for name, cmd in (("start", 0x18), ("end", 0x02)):
+                try:
+                    written = dev.set_feature(bytes([0x04, cmd]) + bytes(62))
+                    print(f"  SET_FEATURE 04 {cmd:02x} ({name}): {written} bytes")
+                except Exception as exc:
+                    print(f"  SET_FEATURE 04 {cmd:02x} ({name}): {exc}")
+                    continue
+                try:
+                    print(f"  GET_FEATURE: {dev.get_feature(0, 64).hex(' ')}")
+                except Exception as exc:
+                    print(f"  GET_FEATURE: {exc}")
     return 0
 
 
@@ -391,6 +431,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--handshake", action="store_true",
                    help="WRITE TEST: send the vendor driver's session start/end feature reports (04 18, 04 02)")
     p.add_argument("--interface", type=int, default=1, help="interface for --handshake (default 1)")
+    p.add_argument("--usb", type=int, metavar="IFACE",
+                   help="probe this interface with libusb control transfers instead of hidraw "
+                        "(for HID interfaces the kernel left unbound); with --handshake also writes")
     p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("udev", help="print a Linux udev rule for non-root access")
@@ -405,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except (DeviceError, capture.CaptureError, KeyError, ValueError, OSError) as exc:
+    except (DeviceError, capture.CaptureError, KeyError, ValueError, OSError, RuntimeError) as exc:
         message = exc.args[0] if isinstance(exc, KeyError) and exc.args else exc
         print(f"error: {message}", file=sys.stderr)
         return 2

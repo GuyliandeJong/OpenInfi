@@ -170,4 +170,7 @@ def udev_rule(vendor_id: int, product_ids: list[int] | None = None) -> str:
         if pid is not None:
             match += f', ATTRS{{idProduct}}=="{pid:04x}"'
         lines.append(f'SUBSYSTEM=="hidraw", {match}, MODE="0660", TAG+="uaccess"')
+        # libusb access for interfaces the HID driver leaves unbound
+        lines.append(f'SUBSYSTEM=="usb", ENV{{DEVTYPE}}=="usb_device", {match.replace("ATTRS", "ATTR")}, '
+                     'MODE="0660", TAG+="uaccess"')
     return "\n".join(lines) + "\n"

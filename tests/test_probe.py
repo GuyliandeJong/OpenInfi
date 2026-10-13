@@ -57,7 +57,8 @@ def test_unconfirmed_protocol_blocks_writes():
 def test_udev_rule_is_scoped_to_product():
     rule = udev_rule(0x05AC, [0x024F])
     assert 'ATTRS{idVendor}=="05ac", ATTRS{idProduct}=="024f"' in rule
-    assert rule.count("SUBSYSTEM") == 1
+    assert rule.count('SUBSYSTEM=="hidraw"') == 1
+    assert 'SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", ATTR{idProduct}=="024f"' in rule
 
 
 class _FakeHid:
@@ -89,3 +90,37 @@ def test_handshake_sends_only_start_and_end():
     assert [p[:3] for p in fake.sent] == [b"\x00\x04\x18", b"\x00\x04\x02"]
     assert all(len(p) == 65 and not any(p[3:]) for p in fake.sent)
     assert probe.handshake(_FakeHid(fail_reads=True), b"/dev/x", lambda m: None) is False
+
+
+class _FakeUsbDevice:
+    def __init__(self):
+        self.calls = []
+
+    def is_kernel_driver_active(self, interface):
+        return False
+
+    def ctrl_transfer(self, request_type, request, value, index, data_or_length, timeout):
+        self.calls.append((request_type, request, value, index))
+        if isinstance(data_or_length, int):
+            return bytes([0x06, 0x13, 0xFF]) if request == 0x06 else bytes(data_or_length)
+        return len(data_or_length)
+
+
+def test_usb_control_requests(monkeypatch):
+    import types
+
+    from infi75 import usbctl
+
+    fake = _FakeUsbDevice()
+    usb_mod = types.SimpleNamespace(
+        core=types.SimpleNamespace(find=lambda **kw: fake, USBError=OSError),
+        util=types.SimpleNamespace(
+            claim_interface=lambda d, i: None, release_interface=lambda d, i: None, dispose_resources=lambda d: None
+        ),
+    )
+    monkeypatch.setattr(usbctl, "_usb", lambda: usb_mod)
+    with usbctl.UsbHid(0x05AC, 0x024F, 3) as dev:
+        assert dev.report_descriptor()[:3] == b"\x06\x13\xff"
+        dev.get_feature()
+        dev.set_feature(bytes([0x04, 0x18]) + bytes(62))
+    assert fake.calls == [(0x81, 0x06, 0x2200, 3), (0xA1, 0x01, 0x0300, 3), (0x21, 0x09, 0x0300, 3)]
