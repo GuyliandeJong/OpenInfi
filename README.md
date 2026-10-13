@@ -126,6 +126,7 @@ infi75 rgb mode rolling --rainbow --direction left
 infi75 rgb mode off
 
 infi75 rgb all purple                               # every key one colour
+infi75 --trace rgb read                             # EXPERIMENT: colours the LEDs show right now
 infi75 rgb keys W=red A=red S=red D=red --default 0,0,40
 
 infi75 keys                                         # key names

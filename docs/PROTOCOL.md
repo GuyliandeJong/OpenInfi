@@ -334,7 +334,8 @@ A still image is 16 chunks; the 20-frame test GIF was 318 chunks.
 |---|---|---|
 | `04 15` | unknown, with data | not decoded |
 | `04 19` | unknown | not decoded |
-| `04 f5` | read back state | not decoded |
+| `04 f5` | live LED read for the driver's light-sync view: byte 8 = 9 gives nine feature reads forming the `[slot, R, G, B]` table of section 5, byte 8 = 3 gives three reads of one brightness byte per slot; the driver then sends `04 02` (function at `0x42da10`) | decoded; `infi75 rgb read` is experimental |
+| screen slots | `04 72` byte 2; the driver always sends 1 | `infi75 screen image --slot 2` untested |
 | macro modes | keymap entry `06` byte 2 values other than 1 | not decoded |
 
 ## 10. Firmware updaters (warning)

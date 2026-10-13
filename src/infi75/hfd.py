@@ -34,6 +34,7 @@ TIME = 0x28
 KEYMAP = 0x11  # base layer
 FN_KEYMAP = 0x27  # what a key does while Fn is held; same table layout
 SYSTEM = 0x17  # game mode, Windows-key lock and sleep timer, one data packet
+READ_LEDS = 0xF5  # live per-key LED state; byte 8 = reports to read (9 colour, 3 brightness)
 MACRO_BEGIN = 0x19  # sent on its own before a macro upload
 MACROS = 0x15  # macro table: byte 8 = packets announced
 KEY_COLORS_PREVIEW = 0x20  # live preview only; the stored custom colours return
@@ -112,7 +113,7 @@ def command(cmd: int, byte2: int = 0, byte8: int = 0) -> bytes:
 COMMAND_NAMES = {START: "start", SAVE: "save", FINISH: "finish", MODE: "lighting", TIME: "clock",
                  KEYMAP: "keymap", FN_KEYMAP: "Fn keymap", SYSTEM: "game mode/sleep", MACRO_BEGIN: "macro begin",
                  MACROS: "macros", KEY_COLORS_PREVIEW: "key colour preview", KEY_COLORS: "key colours",
-                 SCREEN: "screen", 0xF5: "read state"}
+                 SCREEN: "screen", READ_LEDS: "read LEDs"}
 
 
 def describe(packet: bytes) -> str:
@@ -425,6 +426,30 @@ class Session:
         self.send(command(SYSTEM, byte8=1))
         self.send(system_data(settings), ack=False)
         self.send(command(SAVE))  # the vendor driver sends no FINISH here
+
+    def read_key_colors(self) -> dict[int, tuple[int, int, int]]:
+        """Read the colour each LED shows right now, as the vendor driver's light-sync view does.
+
+        04 f5 with byte 8 = 9, then nine 64-byte feature reads forming the slot table [slot, R, G, B],
+        then 04 02. Decoded from the driver, not yet confirmed on hardware.
+        """
+        if self.dry_run or self.link is None:
+            self.send(command(READ_LEDS, byte8=KEY_COLOR_PACKETS))
+            return {}
+        packet = command(READ_LEDS, byte8=KEY_COLOR_PACKETS)
+        if self.trace:
+            self.log(f"> {packet.hex(' ')}")
+        self.link.set_feature(packet)
+        time.sleep(0.01)
+        table = bytearray()
+        for _ in range(KEY_COLOR_PACKETS):
+            reply = bytes(self.link.get_feature(0, PACKET))
+            if self.trace:
+                self.log(f"< {reply.hex(' ')}")
+            table += reply.ljust(PACKET, b"\0")[:PACKET]
+        self.send(command(SAVE))
+        return {n: (table[n * 4 + 1], table[n * 4 + 2], table[n * 4 + 3])
+                for n in range(1, len(table) // 4 - 1) if table[n * 4] == n}
 
     def write_macros(self, macros: list[list[tuple[str, int]]]) -> None:
         """Replace the macro table. Sequence from the vendor driver: 04 19, 04 15, data, 04 02."""

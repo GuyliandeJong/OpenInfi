@@ -93,6 +93,14 @@ def cmd_rgb(args) -> int:
         board.set_key_colors(chosen, default=args.default, brightness=args.brightness)
     elif args.rgb_cmd == "mode":
         board.set_lighting(args.mode, args.color, args.brightness, args.speed, args.rainbow, args.direction)
+    elif args.rgb_cmd == "read":
+        colors = board.read_key_colors()
+        for key in sorted(board.profile.keys, key=lambda k: (k.row, k.x)):
+            if key.name in colors:
+                r, g, b = colors[key.name]
+                print(f"{key.name:10s} #{r:02x}{g:02x}{b:02x}")
+        if not colors and not args.dry_run:
+            print("no colour table in the reply; run with --trace and share the output")
     return 0
 
 
@@ -497,6 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("assign", nargs="+", metavar="KEY=COLOUR")
     p.add_argument("--default", type=parse_color, default=(0, 0, 0), help="colour for unlisted keys")
     p.add_argument("--brightness", type=int, default=5, help="0-5")
+    rgb_sub.add_parser("read", help="EXPERIMENT: read the colour every LED shows right now (04 f5)")
     p = rgb_sub.add_parser("all", help="set every key to one colour")
     p.add_argument("color", type=parse_color)
     p.add_argument("--brightness", type=int, default=5, help="0-5")

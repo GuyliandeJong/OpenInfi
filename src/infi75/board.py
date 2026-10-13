@@ -219,6 +219,17 @@ class InfiBoard:
     def reset_remaps(self, layer: str = "base") -> None:
         self.write_remaps({}, layer)
 
+    def read_key_colors(self) -> dict[str, tuple[int, int, int]]:
+        """Live LED colours by key name (experimental, see hfd.Session.read_key_colors)."""
+        result: dict[int, tuple[int, int, int]] = {}
+
+        def action(session) -> None:
+            result.update(session.read_key_colors())
+
+        self._run(action)
+        by_slot = {k.index: k.name for k in self.profile.keys}
+        return {by_slot[slot]: rgb for slot, rgb in result.items() if slot in by_slot}
+
     def replay(self, packets: list[bytes]) -> int:
         """Send raw 64-byte configuration packets, e.g. from a capture of the vendor driver."""
         for packet in packets:

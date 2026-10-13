@@ -327,3 +327,21 @@ def test_macro_parse_and_board_resolution(tmp_path, monkeypatch):
     board_mod._save_json(board_mod.keymap_state_path("base"), {"A": "macro:box2"})
     with pytest.raises(ValueError, match="used by A"):
         b.delete_macro("box2")
+
+
+def test_read_key_colors_parses_slot_table():
+    class Link(FakeLink):
+        def __init__(self):
+            super().__init__()
+            table = bytearray(9 * 64)
+            table[56 * 4 : 56 * 4 + 4] = bytes([56, 10, 20, 30])
+            self.replies = [bytes(table[i : i + 64]) for i in range(0, len(table), 64)]
+
+        def get_feature(self, report_id=0, length=64):
+            if self.last[:2] == b"\x04\xf5" and self.replies:
+                return self.replies.pop(0)
+            return super().get_feature(report_id, length)
+
+    link = Link()
+    assert hfd.Session(link, delay=0).read_key_colors() == {56: (10, 20, 30)}
+    assert link.sent[0][:2] == b"\x04\xf5" and link.sent[0][8] == 9 and link.sent[1][:2] == b"\x04\x02"
