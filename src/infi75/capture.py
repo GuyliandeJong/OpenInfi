@@ -173,6 +173,30 @@ def _from_pcap(blob: bytes) -> list[Report]:
     return sorted(reports, key=lambda r: r.timestamp)
 
 
+def summary(path: str | Path) -> dict[str, int]:
+    """Count raw USB records by device, endpoint, transfer type and event.
+
+    Used to explain a capture in which no HID reports were recognised.
+    """
+    blob = Path(path).read_bytes()
+    counts: dict[str, int] = {}
+    xfer_names = {0: "iso", 1: "interrupt", 2: "control", 3: "bulk"}
+    for linktype, _ts, frame in _pcap_records(blob):
+        if linktype in (LINKTYPE_USB_LINUX_MMAPPED, LINKTYPE_USB_LINUX) and len(frame) >= 40:
+            _id, ev, xfer, ep, dev = struct.unpack_from("<QcBBB", frame, 0)
+            length = struct.unpack_from("<I", frame, 36)[0]
+            key = (f"dev {dev} ep 0x{ep:02x} {xfer_names.get(xfer, xfer)} "
+                   f"{ev.decode(errors='replace')} {'data' if length else 'no-data'}")
+        elif linktype == LINKTYPE_USBPCAP and len(frame) >= 27:
+            _h, _irp, _st, _fn, info, _bus, dev, ep, xfer, dlen = struct.unpack_from("<HQIHBHHBBI", frame, 0)
+            key = (f"dev {dev} ep 0x{ep:02x} {xfer_names.get(xfer, xfer)} "
+                   f"{'C' if info & 1 else 'S'} {'data' if dlen else 'no-data'}")
+        else:
+            key = f"linktype {linktype}"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _from_text(text: str) -> list[Report]:
     reports = []
     interface: int | None = None

@@ -158,6 +158,10 @@ def cmd_capture(args) -> int:
             sys.stdout.write(text)
     elif args.capture_cmd == "analyze":
         _analyze(reports, args.verbose)
+        if not reports and not args.file.endswith(".txt"):
+            print("raw USB records in the capture:")
+            for key, count in sorted(capture.summary(args.file).items()):
+                print(f"  {count:5d}  {key}")
     elif args.capture_cmd == "diff":
         reports = capture.outgoing(reports)
         other = capture.outgoing(capture.load(args.other))

@@ -101,3 +101,13 @@ def test_usbmon_interrupt_in_and_out(tmp_path):
     reports = capture.load(path)
     assert [(r.kind, r.data[:2]) for r in reports] == [("interrupt", b"\xaa\x10"), ("input", b"\x55\x10")]
     assert capture.outgoing(reports) == reports[:1]
+
+
+def test_summary_counts_raw_usbmon_records(tmp_path):
+    head = struct.pack("<QcBBBHbbqiiII", 1, b"S", 2, 0x80, 4, 1, 0, 0, 0, 0, 0, 0, 0)
+    frame = head + bytes(64 - len(head))
+    blob = struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, capture.LINKTYPE_USB_LINUX_MMAPPED)
+    blob += struct.pack("<IIII", 0, 0, len(frame), len(frame)) + frame
+    path = tmp_path / "s.pcap"
+    path.write_bytes(blob)
+    assert capture.summary(path) == {"dev 4 ep 0x80 control S no-data": 1}
