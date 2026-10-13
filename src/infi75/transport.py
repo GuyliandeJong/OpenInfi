@@ -163,9 +163,11 @@ class Transport:
         return len(packets)
 
 
-def udev_rule(vendor_id: int) -> str:
-    return (
-        "# infi75: allow non-root access to the keyboard's HID interfaces\n"
-        f'SUBSYSTEM=="hidraw", ATTRS{{idVendor}}=="{vendor_id:04x}", MODE="0660", TAG+="uaccess"\n'
-        f'SUBSYSTEM=="usb", ATTRS{{idVendor}}=="{vendor_id:04x}", MODE="0660", TAG+="uaccess"\n'
-    )
+def udev_rule(vendor_id: int, product_ids: list[int] | None = None) -> str:
+    lines = ["# infi75: allow the logged-in user to access the keyboard's HID interfaces"]
+    for pid in product_ids or [None]:
+        match = f'ATTRS{{idVendor}}=="{vendor_id:04x}"'
+        if pid is not None:
+            match += f', ATTRS{{idProduct}}=="{pid:04x}"'
+        lines.append(f'SUBSYSTEM=="hidraw", {match}, MODE="0660", TAG+="uaccess"')
+    return "\n".join(lines) + "\n"

@@ -38,6 +38,7 @@ class Profile:
     screen_transpose: bool
     keys: list[Key] = field(default_factory=list)
     verified: bool = False
+    protocol: str = "unconfirmed"
     source: str = ""
 
     def key(self, name: str) -> Key:
@@ -85,5 +86,6 @@ def load(path: str | Path | None = None) -> Profile:
         screen_transpose=bool(screen.get("transpose", True)),
         keys=[Key(**k) for k in data.get("keys", [])],
         verified=bool(data.get("verified", False)),
+        protocol=data.get("protocol", "unconfirmed"),
         source=source,
     )

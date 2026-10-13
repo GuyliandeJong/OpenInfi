@@ -13,29 +13,35 @@ Linux / Windows / macOS (via [hidapi](https://github.com/libusb/hidapi)).
 
 ## Status: read this first
 
-No public documentation of the INFI75's USB protocol exists. This tool
-implements the **Royuan protocol family** (USB vendor ID `0x3151`), which
-is used by keyboards from the same Epomaker-distributed ecosystem and was
-reverse-engineered for the Epomaker RT100 by
-[epomaker-controller](https://github.com/strodgers/epomaker-controller) and
-[OpenRGB](https://gitlab.com/CalcProgrammer1/OpenRGB). The packet builders
-here reproduce that implementation byte for byte (see `tests/`).
+Confirmed on hardware (wired USB): the INFI75 enumerates as **`05ac:024f`**
+with a **SONiX** controller (`SONiX INFI75-1.2`), exposing a vendor
+feature collection (usage page `0xFFFF`) on interface 1 and a vendor
+collection (`0xFF68`, usage `0x61`) on interface 2. Over Bluetooth it shows
+up as `INFI75 5.3` without vendor interfaces, so configuration requires the
+cable.
 
-Whether the INFI75 speaks exactly this dialect has **not been confirmed on
-hardware**. The bundled profile (`src/infi75/profiles/infi75.json`) is
-marked `"verified": false` and has these open points:
+The configuration protocol is **not identified yet**. Two families are
+known for this USB ID and interface layout:
 
-| Item | Assumed | How to confirm |
+| Family | Transport | Reference |
 |---|---|---|
-| USB vendor / product ID | `0x3151`, any PID | `infi75 list --all` |
-| Interfaces | lighting = 1, screen = 2 | `infi75 list`, `infi75 capture analyze` |
-| Key index per physical key | Royuan column-major order (DynaTab 75X) | `infi75 rgb probe` |
-| Screen resolution | unknown | `infi75 capture analyze` on an image-upload capture |
+| "online" (AJAZZ/HFD web driver) | output reports, `0xAA` frames, `0x55` replies | [ak820pro-modder](https://github.com/wsclx/ak820pro-modder/blob/main/docs/PROTOCOL.md) |
+| "legacy" | 64-byte feature reports starting `0x04` | [MonKey](https://github.com/snailb1007/MonKey), OpenRGB Valkyrie VK99 |
 
-If something does not match, the capture workflow below gives you the real
-packets, and every value above is editable in a copy of the profile
-(`--profile my-infi75.json`). Use `--dry-run` to see packets without
-sending anything.
+Run the read-only identification and share its output:
+
+```console
+infi75 probe
+```
+
+It prints each interface's report descriptor sizes, sends only
+`GET_DEVICE_INFO`, and reads feature reports. It writes no settings.
+
+Until the protocol is confirmed, the profile is marked
+`"protocol": "unconfirmed"` and the lighting/remap/screen commands refuse
+to write to the device; `--dry-run` still works. The packet builders in
+`protocol.py` implement the Royuan (VID `0x3151`) family used by Epomaker's
+RT100, which turned out not to be what the INFI75 uses.
 
 ## Install
 
@@ -53,13 +59,15 @@ installers for Windows and macOS). fish users activate the venv with
 `. .venv/bin/activate.fish`.
 
 **Linux permissions:** install the udev rule once, then replug the keyboard.
+The rule is scoped to the profile's vendor and product ID.
 
 ```console
 infi75 udev | sudo tee /etc/udev/rules.d/70-infi75.rules
 sudo udevadm control --reload && sudo udevadm trigger
 ```
 
-Connect the keyboard **by USB cable**; wireless modes are not supported.
+Connect the keyboard **by USB cable in wired mode** and disconnect
+Bluetooth; wireless modes are not supported.
 
 ## Usage
 
@@ -83,8 +91,8 @@ infi75 screen time
 infi75 --dry-run rgb all red                  # print packets, send nothing
 ```
 
-Global options go before the command: `--profile FILE`, `--vid 0x3151`,
-`--pid 0x4015`, `--dry-run`.
+Global options go before the command: `--profile FILE`, `--vid 0x05ac`,
+`--pid 0x024f`, `--dry-run`.
 
 Effects: `static breathing spectrum drift ripple twinkle stream shadowing
 peaks sine_wave surging blooming laser peak_turn rain snow meteor

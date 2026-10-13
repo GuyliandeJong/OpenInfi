@@ -54,8 +54,8 @@ def _keyboard(args) -> Keyboard:
         prof.vendor_id = args.vid
     if not prof.verified and not args.dry_run:
         print(
-            f"warning: profile '{prof.name}' is unverified; commands follow the Royuan "
-            "protocol family and may not match this board. Use --dry-run to inspect.",
+            f"warning: profile '{prof.name}' is unverified (protocol: {prof.protocol}). "
+            "Use --dry-run to inspect packets first.",
             file=sys.stderr,
         )
     return Keyboard(prof, Transport(prof, product_id=args.pid, dry_run=args.dry_run))
@@ -219,9 +219,62 @@ def cmd_replay(args) -> int:
     return 0
 
 
+def cmd_probe(args) -> int:
+    """Identify the configuration protocol with read-only queries."""
+    from . import probe
+    from .transport import _hid
+
+    prof = profiles.load(args.profile)
+    vid = args.vid if args.vid is not None else prof.vendor_id
+    pids = [args.pid] if args.pid is not None else prof.product_ids
+    log = print
+    hid = _hid()
+    if not sys.platform.startswith("linux"):
+        print("descriptor dump is Linux-only; probing vendor interfaces with 64-byte reports")
+        for interface in enumerate_interfaces(vid):
+            if interface.usage_page >= 0xFF00 and (not pids or interface.product_id in pids):
+                print(f"{interface}")
+                probe.query_online(hid, interface.path, 64, log)
+        return 0
+
+    nodes = [n for pid in pids for n in probe.linux_nodes(vid, pid)] if pids else []
+    if not nodes:
+        print(f"no hidraw nodes for {vid:04x}:{','.join(f'{p:04x}' for p in pids) or '*'}; "
+              "is the keyboard connected by cable in wired mode?")
+        return 1
+    answered = False
+    for node in nodes:
+        print(f"\n{node.path}  interface {node.interface}  {node.name}")
+        for col in node.collections:
+            sizes = ", ".join(f"{kind}[id {rid}]={size}B" for (kind, rid), size in sorted(col.reports.items()))
+            print(f"  collection usage_page=0x{col.usage_page:04x} usage=0x{col.usage:02x}: {sizes or '-'}")
+        vendor = [c for c in node.collections if c.usage_page >= 0xFF00]
+        if not vendor:
+            continue
+        try:
+            for col in vendor:
+                out = col.reports.get(("output", 0))
+                if out and out <= 4200:
+                    print(f"  probing 'online' protocol (GET_DEVICE_INFO, {out}-byte output report)")
+                    answered |= probe.query_online(hid, node.path.encode(), out, log)
+                feature_ids = sorted({rid for kind, rid in col.reports if kind == "feature"})
+                if feature_ids:
+                    print(f"  reading feature reports {feature_ids}")
+                    probe.read_features(hid, node.path.encode(), feature_ids, log)
+        except OSError as exc:
+            print(f"  cannot open {node.path}: {exc} (install the udev rule: 'infi75 udev')")
+    print("\nresult: " + ("keyboard answered the 'online' protocol" if answered
+                           else "no 'online' reply; paste this output for analysis"))
+    return 0
+
+
 def cmd_udev(args) -> int:
     prof = profiles.load(args.profile)
-    sys.stdout.write(udev_rule(args.vid if args.vid is not None else prof.vendor_id))
+    if args.vid is not None:
+        rule = udev_rule(args.vid, [args.pid] if args.pid is not None else None)
+    else:
+        rule = udev_rule(prof.vendor_id, prof.product_ids)
+    sys.stdout.write(rule)
     print("# save as /etc/udev/rules.d/70-infi75.rules, then: sudo udevadm control --reload && "
           "sudo udevadm trigger", file=sys.stderr)
     return 0
@@ -307,6 +360,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--only-interface", type=int, help="replay only reports captured on this interface")
     p.add_argument("--to-interface", type=int, help="send everything to this interface")
     p.set_defaults(func=cmd_replay)
+
+    p = sub.add_parser("probe", help="identify the keyboard's protocol (read-only)")
+    p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("udev", help="print a Linux udev rule for non-root access")
     p.set_defaults(func=cmd_udev)

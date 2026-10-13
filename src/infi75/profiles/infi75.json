@@ -1,10 +1,11 @@
 {
   "name": "Infiverse INFI75 (ANSI)",
   "verified": false,
-  "notes": "Unverified starting point based on the Royuan (VID 0x3151) protocol family used by other Epomaker-distributed boards. Confirm VID/PID with 'infi75 list', key indices with 'infi75 rgb probe', and the screen size with 'infi75 capture analyze'.",
+  "protocol": "unconfirmed",
+  "notes": "USB ID 05ac:024f with a SONiX controller, confirmed on hardware over USB. The configuration protocol is not identified yet: run 'infi75 probe'. Key indices and screen geometry are placeholders.",
   "usb": {
-    "vendor_id": "0x3151",
-    "product_ids": [],
+    "vendor_id": "0x05ac",
+    "product_ids": ["0x024f"],
     "lighting_interface": 1,
     "screen_interface": 2,
     "report_type": "feature"

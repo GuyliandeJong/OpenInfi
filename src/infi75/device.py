@@ -20,12 +20,23 @@ class Keyboard:
     def _size(self) -> int:
         return self.profile.packet_size
 
+    def _require_protocol(self) -> None:
+        """Only the Royuan packet builders exist so far; never send them to another protocol."""
+        if self.profile.protocol != "royuan" and not self.transport.dry_run:
+            raise DeviceError(
+                f"profile '{self.profile.name}' has protocol '{self.profile.protocol}'; the packets this "
+                "tool can build are for the Royuan protocol and could misconfigure another firmware. "
+                "Run 'infi75 probe' to identify the protocol, or use --dry-run."
+            )
+
     def set_lighting(self, settings: protocol.Lighting) -> None:
+        self._require_protocol()
         packets = protocol.lighting(settings, self._size)
         self.transport.send(packets, self.profile.lighting_interface)
 
     def set_key_colors(self, colors: dict[str, tuple[int, int, int]], default=(0, 0, 0)) -> None:
         """*colors* maps profile key names (or ``#index``) to RGB; others get *default*."""
+        self._require_protocol()
         by_index = {key.index: default for key in self.profile.keys}
         for name, color in colors.items():
             by_index[self.profile.key(name).index] = color
@@ -34,18 +45,22 @@ class Keyboard:
 
     def probe_index(self, index: int, color=(255, 255, 255)) -> None:
         """Light exactly one firmware index; used to map indices to physical keys."""
+        self._require_protocol()
         packets = protocol.key_colors({index: color}, self.profile.rgb_slots, size=self._size)
         self.transport.send(packets, self.profile.lighting_interface, erase_after_first=True)
 
     def remap(self, key_name: str, hid_code: int) -> None:
+        self._require_protocol()
         key = self.profile.key(key_name)
         self.transport.send(protocol.remap(key.index, hid_code, self._size), self.profile.lighting_interface)
 
     def sync_time(self, when: datetime | None = None) -> None:
+        self._require_protocol()
         packets = protocol.set_time(when or datetime.now(), self._size)
         self.transport.send(packets, self.profile.lighting_interface)
 
     def upload_image(self, path: str | Path, width: int | None = None, height: int | None = None) -> None:
+        self._require_protocol()
         width = width or self.profile.screen_width
         height = height or self.profile.screen_height
         if not width or not height:
