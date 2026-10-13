@@ -261,17 +261,24 @@ def cmd_probe(args) -> int:
         try:
             for col in vendor:
                 out = col.reports.get(("output", 0))
-                if out and out <= 4200:
+                if args.online and out and out <= 4200:
                     print(f"  probing 'online' protocol (GET_DEVICE_INFO, {out}-byte output report)")
                     answered |= probe.query_online(hid, node.path.encode(), out, log)
                 feature_ids = sorted({rid for kind, rid in col.reports if kind == "feature"})
                 if feature_ids:
                     print(f"  reading feature reports {feature_ids}")
                     probe.read_features(hid, node.path.encode(), feature_ids, log)
+            # The vendor driver configures the board with 64-byte feature reports
+            # (report ID 0) even where the descriptor declares none. Linux hidraw
+            # passes GET_REPORT through unvalidated, so read one (no write).
+            if not any(kind == "feature" for c in vendor for kind, _ in c.reports):
+                print("  reading undeclared feature report 0 (read-only)")
+                probe.read_features(hid, node.path.encode(), [0], log)
         except OSError as exc:
             print(f"  cannot open {node.path}: {exc} (install the udev rule: 'infi75 udev')")
-    print("\nresult: " + ("keyboard answered the 'online' protocol" if answered
-                           else "no 'online' reply; paste this output for analysis"))
+    if args.online:
+        print("\nresult: " + ("keyboard answered the 'online' protocol" if answered
+                               else "no 'online' reply; paste this output for analysis"))
     return 0
 
 
@@ -369,6 +376,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_replay)
 
     p = sub.add_parser("probe", help="identify the keyboard's protocol (read-only)")
+    p.add_argument("--online", action="store_true",
+                   help="also send GET_DEVICE_INFO in the AJAZZ/HFD online framing (a 4096-byte output report)")
     p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("udev", help="print a Linux udev rule for non-root access")
