@@ -1,12 +1,12 @@
 {
   "name": "Infiverse INFI75 (ANSI)",
   "verified": false,
-  "protocol": "unconfirmed",
-  "notes": "USB ID 05ac:024f with a SONiX controller, confirmed on hardware over USB. The configuration protocol is not identified yet: run 'infi75 probe'. Key indices and screen geometry are placeholders.",
+  "protocol": "hfd",
+  "notes": "USB ID 05ac:024f, SONiX SN32F290 (HFD RKGK890). Configuration uses 64-byte feature reports on interface 3 (usage page 0xFF13), reached through libusb because the firmware declares that interface without an IN endpoint. Lighting and clock sync are implemented; key indices and screen geometry are still placeholders.",
   "usb": {
     "vendor_id": "0x05ac",
     "product_ids": ["0x024f"],
-    "lighting_interface": 1,
+    "lighting_interface": 3,
     "screen_interface": 2,
     "report_type": "feature"
   },

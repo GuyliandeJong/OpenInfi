@@ -88,17 +88,69 @@ def cmd_keys(args) -> int:
     return 0
 
 
+def _hfd_session(args):
+    """Open the libusb link to the configuration interface of an HFD-protocol board."""
+    from . import hfd, usbctl
+
+    prof = profiles.load(args.profile)
+    vid = args.vid if args.vid is not None else prof.vendor_id
+    pid = args.pid if args.pid is not None else (prof.product_ids[0] if prof.product_ids else None)
+    if args.dry_run:
+        return prof, hfd.Session(None, dry_run=True), None
+    if pid is None:
+        raise DeviceError("profile has no product id; pass --pid")
+    link = usbctl.UsbHid(vid, pid, prof.lighting_interface or hfd.CONFIG_INTERFACE)
+    return prof, hfd.Session(link), link
+
+
+def _run_hfd(args, action) -> int:
+    from contextlib import nullcontext
+
+    _prof, session, link = _hfd_session(args)
+    with link if link is not None else nullcontext():
+        action(session)
+    return 0
+
+
+def _is_hfd(args) -> bool:
+    return profiles.load(args.profile).protocol == "hfd"
+
+
 def cmd_rgb(args) -> int:
+    if args.rgb_cmd == "effects":
+        if _is_hfd(args):
+            from . import hfd
+
+            for name, value in hfd.MODES.items():
+                print(f"{value:3d}  {name}")
+        else:
+            for mode in protocol.Mode:
+                print(f"{int(mode):3d}  {mode.name.lower()}")
+        return 0
+    if _is_hfd(args):
+        from . import hfd
+
+        if args.rgb_cmd != "mode":
+            raise DeviceError(f"'rgb {args.rgb_cmd}' is not implemented for this keyboard yet")
+        settings = hfd.Lighting(
+            mode=hfd.resolve_mode(args.mode),
+            color=args.color,
+            rainbow=args.rainbow,
+            brightness=args.brightness,
+            speed=args.speed,
+            direction=hfd.DIRECTIONS[args.direction],
+        )
+        return _run_hfd(args, lambda s: s.set_lighting(settings))
     kb = _keyboard(args)
     if args.rgb_cmd == "mode":
         kb.set_lighting(
             protocol.Lighting(
-                mode=protocol.Mode[args.mode.upper()],
+                mode=_royuan_mode(args.mode),
                 color=args.color,
                 speed=args.speed,
                 brightness=args.brightness,
                 rainbow=args.rainbow,
-                direction=protocol.Direction[args.direction.upper()],
+                direction=protocol.Direction[args.direction.upper()],  # same names in both protocols
             )
         )
     elif args.rgb_cmd == "keys":
@@ -125,7 +177,16 @@ def cmd_rgb(args) -> int:
     return 0
 
 
+def _royuan_mode(name: str) -> protocol.Mode:
+    try:
+        return protocol.Mode[name.upper()]
+    except KeyError:
+        raise ValueError(f"unknown effect {name!r}; known: {', '.join(m.name.lower() for m in protocol.Mode)}") from None
+
+
 def cmd_remap(args) -> int:
+    if _is_hfd(args):
+        raise DeviceError("key remapping is not implemented for this keyboard yet")
     kb = _keyboard(args)
     hid_code = hidkeys.code(args.to)
     kb.remap(args.key, hid_code)
@@ -134,6 +195,11 @@ def cmd_remap(args) -> int:
 
 
 def cmd_screen(args) -> int:
+    if _is_hfd(args):
+        if args.screen_cmd == "time":
+            when = datetime.fromisoformat(args.at) if args.at else None
+            return _run_hfd(args, lambda s: s.sync_time(when))
+        raise DeviceError("screen image upload is not implemented for this keyboard yet")
     kb = _keyboard(args)
     if args.screen_cmd == "image":
         width, height = args.size if args.size else (None, None)
@@ -373,12 +439,13 @@ def build_parser() -> argparse.ArgumentParser:
     rgb = sub.add_parser("rgb", help="lighting")
     rgb_sub = rgb.add_subparsers(dest="rgb_cmd", required=True)
     p = rgb_sub.add_parser("mode", help="set the global lighting effect")
-    p.add_argument("mode", choices=[m.name.lower() for m in protocol.Mode])
+    p.add_argument("mode", help="effect name or number; 'infi75 rgb effects' lists them")
     p.add_argument("--color", type=parse_color, default=(255, 255, 255))
     p.add_argument("--speed", type=int, default=3, help="0-5")
-    p.add_argument("--brightness", type=int, default=4, help="0-4")
+    p.add_argument("--brightness", type=int, default=4, help="0-5 (INFI75), 0-4 (Royuan boards)")
     p.add_argument("--rainbow", action="store_true", help="cycle colours instead of --color")
-    p.add_argument("--direction", choices=[d.name.lower() for d in protocol.Direction], default="right")
+    p.add_argument("--direction", choices=["left", "right", "up", "down"], default="right")
+    rgb_sub.add_parser("effects", help="list the lighting effects of the selected keyboard")
     p = rgb_sub.add_parser("keys", help="per-key colours, e.g. ESC=red W=#00ff00 '#40=255,0,0'")
     p.add_argument("assign", nargs="+", metavar="KEY=COLOUR")
     p.add_argument("--default", type=parse_color, default=(0, 0, 0), help="colour for unlisted keys")

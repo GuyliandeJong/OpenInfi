@@ -48,7 +48,7 @@ def test_parse_device_info():
 
 def test_unconfirmed_protocol_blocks_writes():
     prof = profiles.load()
-    assert prof.protocol == "unconfirmed"
+    prof.protocol = "unconfirmed"
     keyboard = Keyboard(prof, Transport(prof, dry_run=False))
     with pytest.raises(DeviceError, match="infi75 probe"):
         keyboard.sync_time()
