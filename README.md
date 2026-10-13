@@ -47,8 +47,10 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install .
 ```
 
-The GUI needs Tk (`sudo apt install python3-tk` on Debian/Ubuntu; included
-in the python.org installers for Windows and macOS).
+The GUI needs Tk (`sudo pacman -S tk` on Arch/CachyOS,
+`sudo apt install python3-tk` on Debian/Ubuntu; included in the python.org
+installers for Windows and macOS). fish users activate the venv with
+`. .venv/bin/activate.fish`.
 
 **Linux permissions:** install the udev rule once, then replug the keyboard.
 

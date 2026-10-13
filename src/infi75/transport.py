@@ -15,6 +15,16 @@ class DeviceError(RuntimeError):
 
 
 def _hid():
+    # On Linux the "hidapi" wheel's `hid` module uses libusb, which detaches
+    # the kernel driver from the opened interface; its `hidraw` module talks
+    # to /dev/hidraw* instead and leaves the keyboard untouched.
+    if sys.platform.startswith("linux"):
+        try:
+            import hidraw
+
+            return hidraw
+        except ImportError:
+            pass
     try:
         import hid  # provided by the "hidapi" package
     except ImportError as exc:
