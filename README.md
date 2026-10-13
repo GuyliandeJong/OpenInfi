@@ -18,6 +18,7 @@ All confirmed on an INFI75-1.2 over USB on Linux:
 | Key remapping | any key to another key, a combination (`ctrl+c`) or a media key; restore and reset |
 | Fn layer | what a key does while Fn is held (not yet confirmed on hardware) |
 | Game mode, sleep | game mode with Win / Alt+Tab / Alt+F4 blocking; sleep timer (not yet confirmed on hardware) |
+| Macros | key sequences with delays, typed text and mouse clicks, recorded or written as text, played by any key (not yet confirmed on hardware) |
 | Saved setups | store lighting, colours, remaps, game mode and screen under a name; switch with one click |
 | Screen | still images and animated GIFs (135 x 240), with crop, stretch or letterbox fitting |
 | Clock | set the screen clock to the computer's time, once or automatically (after login, periodically, on plug-in) |
@@ -98,6 +99,7 @@ install the permission rule).
 | **Lighting** | Effect tiles grouped as static, animated and reactive, each with a short description. Pick a colour on the colour wheel or a swatch, rainbow, brightness, speed and direction; controls an effect does not use are disabled. Changes are sent automatically after a short pause (sliders when released), so dragging does not cause dozens of writes. |
 | **Key colours** | The keyboard drawn in its colours. Click a key, Shift-click to add, drag to select a group, or use the quick selections (letters, F-row, WASD, arrows). With keys selected, a colour click paints them. Presets: rainbow, gaming, rows, single colour, all off. Nothing is sent until **Apply to keyboard**; **Revert** undoes edits. |
 | **Remap keys** | Click a key, then press **Press to record a key** and press the key or combination it should produce (for example Ctrl+C), or choose from the searchable list including media keys. **With Fn held** switches to the Fn layer; keys the keyboard reserves for its own Fn functions are grey. Remapped keys carry a badge; **Restore default** and **Restore all keys** undo. |
+| **Macros** | Record a sequence (with or without your timing) or type it, see what it will play, save it to the keyboard. Assign it on the Remap keys page under **Macros**. |
 | **Screen** | Drop an image or GIF (or browse). The preview shows exactly what the screen will display, animated for GIFs, for each fit: fill, fit with black bars, or stretch. **Send to keyboard** shows progress. The clock card syncs the keyboard clock now, or turns on automatic sync. |
 | **Settings** | Game mode (with Win, Alt+Tab and Alt+F4 blocking) and the sleep timer. **Saved setups**: save the current lighting, colours, remaps, game mode and screen picture under a name, and apply one with a click. |
 | **Device** | Connection, firmware and a read-only check of both keyboard channels and the permission rule, the permission command with a copy button, simulation mode (shows the data, sends nothing) and the activity log. |
@@ -105,6 +107,10 @@ install the permission rule).
 | Lighting | Remap keys |
 |---|---|
 | ![Lighting](docs/images/ui-lighting.png) | ![Remap keys](docs/images/ui-remap.png) |
+
+| Macros | Device |
+|---|---|
+| ![Macros](docs/images/ui-macros.png) | ![Device](docs/images/ui-device.png) |
 
 | Screen | Settings |
 |---|---|
@@ -130,6 +136,11 @@ infi75 remap CAPS default                           # restore one key
 infi75 remap --fn F1 mute                           # Fn + F1 mutes
 infi75 remap --list                                 # both layers
 infi75 remap --reset                                # restore all keys (add --fn for the Fn layer)
+
+infi75 macro save sig "text:Guylian enter"         # key sequence; also ctrl+c 50ms +shift a -shift mouse1
+infi75 macro list
+infi75 remap F12 macro:sig                          # macro:sigx3 plays it 3 times
+infi75 macro delete sig                             # refused while a key uses it
 
 infi75 system --game-mode on --block win,alttab     # --block none to allow everything
 infi75 system --sleep 3                             # vendor steps 1-5
@@ -157,7 +168,7 @@ or `r,g,b`.
 
 The keyboard replaces its whole remap table on every write, so the tool
 keeps your remaps in `~/.config/infi75/keymap.json` and sends all of them
-each time (`keymap-fn.json` for the Fn layer). The app also remembers the
+each time (`keymap-fn.json` for the Fn layer, `macros.json` for macros). The app also remembers the
 last applied lighting (`lighting.json`), key colours (`colors.json`), game
 mode and sleep (`system.json`) and screen picture (`screen.json`) in the
 same folder, so it opens showing what is on the keyboard. Saved setups are

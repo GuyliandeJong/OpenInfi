@@ -283,3 +283,47 @@ def test_board_layers_setups_and_reserved_fn_keys(tmp_path, monkeypatch, capsys)
     assert "04 11" in commands and "04 27" in commands and "04 13" in commands
     b.delete_setup("Gaming Night")
     assert b.setups() == []
+
+
+def test_macro_table_matches_vendor_layout():
+    from infi75 import macro
+
+    packets, payload = hfd.macro_payload([macro.parse("ctrl+c"), [], macro.parse("a")])
+    assert payload[0:4] == bytes([0x90, 0x01, 0, 0])  # first macro right after the 400-byte header
+    assert payload[4:8] == b"\xff\xff\xff\xff"  # empty slot
+    first = payload[400:400 + 8 + 7 * 4]
+    assert first[:2] == bytes([7, 0])  # 4 key events plus 3 inserted 10 ms gaps
+    assert first[8:12] == bytes([0, 0, 0xE0, 0xB0]) and first[12:16] == bytes([10, 0, 0, 0x50])
+    assert first[-4:] == bytes([0, 0, 0xE0, 0x30])
+    end = 400 + 36 + 20
+    assert packets == -(-end // 64) + 1 == 9
+    assert payload[packets * 64 - 2 : packets * 64] == b"\xaa\x55"
+    assert len(payload) == (packets + 1) * 64
+    assert hfd.key_entry("macro:1x3") == bytes([0x06, 1, 1, 3])
+
+
+def test_macro_upload_sequence():
+    link = FakeLink()
+    hfd.Session(link, delay=0).write_macros([[("down", 4), ("up", 4)]])
+    heads = [p[:2].hex() for p in link.sent if p[0] == 4]
+    assert heads == ["0419", "0415", "0402"]
+    assert link.sent[1][8] == (len(link.sent) - 3) - 1  # announced = sent data packets - 1
+
+
+def test_macro_parse_and_board_resolution(tmp_path, monkeypatch):
+    from infi75 import board as board_mod
+    from infi75 import macro, profile
+
+    assert macro.parse("+lshift a -lshift 20ms mouse1") == [
+        ("down", 0xE1), ("down", 4), ("up", 4), ("up", 0xE1), ("delay", 20), ("mouse_down", 1), ("mouse_up", 1)]
+    with pytest.raises(ValueError):
+        macro.parse("text:a!")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    board_mod._save_json(board_mod.macros_state_path(), [{"name": "copy", "sequence": "ctrl+c"},
+                                                         {"name": "box2", "sequence": "b"}])
+    b = board_mod.InfiBoard(profile.load(), dry_run=True, log=lambda _m: None)
+    assert b._resolve_macro("macro:box2") == "macro:1x1"
+    assert b._resolve_macro("macro:copyx4") == "macro:0x4"
+    board_mod._save_json(board_mod.keymap_state_path("base"), {"A": "macro:box2"})
+    with pytest.raises(ValueError, match="used by A"):
+        b.delete_macro("box2")

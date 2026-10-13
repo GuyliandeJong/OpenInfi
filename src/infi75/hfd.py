@@ -34,6 +34,8 @@ TIME = 0x28
 KEYMAP = 0x11  # base layer
 FN_KEYMAP = 0x27  # what a key does while Fn is held; same table layout
 SYSTEM = 0x17  # game mode, Windows-key lock and sleep timer, one data packet
+MACRO_BEGIN = 0x19  # sent on its own before a macro upload
+MACROS = 0x15  # macro table: byte 8 = packets announced
 KEY_COLORS_PREVIEW = 0x20  # live preview only; the stored custom colours return
 KEY_COLORS = 0x23  # stored custom colours shown by CUSTOM_MODE
 
@@ -161,12 +163,22 @@ def key_entry(target: str) -> bytes:
     Keyboard keys: [02, modifier bits, HID usage, 00], e.g. "ctrl+c".
     A modifier on its own: [02, bit, 00, 00]. Media keys: [03, usage lo, usage hi, 00].
     "default" gives 00 00 00 00, which keeps the key's built-in function.
+    Macros: "macro:N" or "macro:NxCOUNT" (N = 0-based table index) gives [06, N, mode 1, COUNT].
     """
     from . import hidkeys
 
     spec = target.strip().lower()
     if spec in ("default", "reset"):
         return bytes(4)
+    if spec.startswith("macro:"):
+        index, _, count = spec[6:].partition("x")
+        try:
+            index_n, count_n = int(index), int(count or 1)
+        except ValueError:
+            raise ProtocolError(f"{target!r}: use macro:INDEX or macro:INDEXxCOUNT") from None
+        if not 0 <= index_n < MACRO_SLOTS or not 1 <= count_n <= 255:
+            raise ProtocolError(f"{target!r}: macro index 0-{MACRO_SLOTS - 1}, count 1-255")
+        return bytes((0x06, index_n, MACRO_MODES["times"], count_n))
     if spec in MEDIA:
         usage = MEDIA[spec]
         return bytes((0x03, usage & 0xFF, usage >> 8, 0))
@@ -183,6 +195,68 @@ def key_entry(target: str) -> bytes:
     if last in MODIFIER_BITS:
         return bytes((0x02, mods | MODIFIER_BITS[last], 0, 0))
     return bytes((0x02, mods, last, 0))
+
+
+MACRO_SLOTS = 100  # 4-byte offset entries in front of the macro data
+MACRO_HEADER = MACRO_SLOTS * 4
+MACRO_BUFFER = 0xE00  # the vendor driver's buffer
+MACRO_DEFAULT_GAP_MS = 10  # inserted by the vendor driver between two non-delay events
+# event flags in byte 3; byte 2 carries the HID usage or mouse button
+MACRO_KEY_DOWN, MACRO_KEY_UP = 0xB0, 0x30
+MACRO_MOUSE_DOWN, MACRO_MOUSE_UP = 0x90, 0x10
+MACRO_DELAY = 0x50
+MOUSE_BUTTONS = {1: 0x01, 2: 0x04, 3: 0x02}  # vendor list order left, right(?), middle(?) -> wire value
+MACRO_MODES = {"times": 1}  # keymap entry byte 2; only the repeat-count mode is assumed so far
+
+
+def macro_event(kind: str, value: int) -> bytes:
+    if kind == "delay":
+        if not 0 <= value <= 0xFFFF:
+            raise ProtocolError(f"delay {value} ms out of range 0-65535")
+        return bytes((value & 0xFF, value >> 8, 0, MACRO_DELAY))
+    flag = {"down": MACRO_KEY_DOWN, "up": MACRO_KEY_UP,
+            "mouse_down": MACRO_MOUSE_DOWN, "mouse_up": MACRO_MOUSE_UP}.get(kind)
+    if flag is None:
+        raise ProtocolError(f"unknown macro event {kind!r}")
+    if kind.startswith("mouse"):
+        if value not in MOUSE_BUTTONS:
+            raise ProtocolError(f"mouse button must be 1-3, got {value}")
+        value = MOUSE_BUTTONS[value]
+    return bytes((0, 0, value & 0xFF, flag))
+
+
+def macro_payload(macros: list[list[tuple[str, int]]]) -> tuple[int, bytes]:
+    """Macro table as the vendor driver builds it. Returns (packets announced, bytes to send).
+
+    Layout: 100 entries of 4 bytes (little-endian offset of the macro, ff ff ff ff when empty), then per
+    macro an 8-byte header (event count, little-endian, in bytes 0-1) and its 4-byte events. The buffer
+    is padded to whole packets plus one, with aa 55 in its last two bytes; one more zero packet follows.
+    """
+    if len(macros) > MACRO_SLOTS:
+        raise ProtocolError(f"at most {MACRO_SLOTS} macros")
+    buf = bytearray(MACRO_BUFFER)
+    end = MACRO_HEADER
+    for n, events in enumerate(macros):
+        if not events:
+            buf[n * 4 : n * 4 + 4] = b"\xff\xff\xff\xff"
+            continue
+        buf[n * 4 : n * 4 + 2] = end.to_bytes(2, "little")
+        encoded: list[bytes] = []
+        last_was_delay = False
+        for kind, value in events:
+            if kind != "delay" and encoded and not last_was_delay:
+                encoded.append(macro_event("delay", MACRO_DEFAULT_GAP_MS))
+            encoded.append(macro_event(kind, value))
+            last_was_delay = kind == "delay"
+        size = 8 + 4 * len(encoded)
+        if end + size + 2 * PACKET > MACRO_BUFFER:
+            raise ProtocolError("macros too long for the keyboard's macro memory")
+        buf[end : end + 2] = len(encoded).to_bytes(2, "little")
+        buf[end + 8 : end + size] = b"".join(encoded)
+        end += size
+    packets = -(-end // PACKET) + 1
+    buf[packets * PACKET - 2 : packets * PACKET] = b"\xaa\x55"
+    return packets, bytes(buf[: (packets + 1) * PACKET])
 
 
 def keymap_payload(entries: dict[int, bytes]) -> bytes:
@@ -331,6 +405,17 @@ class Session:
         self.send(command(SYSTEM, byte8=1))
         self.send(system_data(settings), ack=False)
         self.send(command(SAVE))  # the vendor driver sends no FINISH here
+
+    def write_macros(self, macros: list[list[tuple[str, int]]]) -> None:
+        """Replace the macro table. Sequence from the vendor driver: 04 19, 04 15, data, 04 02."""
+        packets, payload = macro_payload(macros)
+        self.send(command(MACRO_BEGIN))
+        self.send(command(MACROS, byte8=packets))
+        time.sleep(0.03)
+        for offset in range(0, len(payload), PACKET):
+            self.send(payload[offset : offset + PACKET], ack=False)
+        time.sleep(0.03)
+        self.send(command(SAVE))
 
     def set_key_colors(self, colors: dict[int, tuple[int, int, int]], brightness: int = 5) -> None:
         """Store per-key colours and switch to the custom effect that displays them."""

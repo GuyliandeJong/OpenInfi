@@ -261,6 +261,25 @@ def cmd_screen(args) -> int:
     return 0
 
 
+def cmd_macro(args) -> int:
+    from . import macro
+
+    board = _board(args)
+    if args.macro_cmd == "list":
+        macros = board.macros()
+        for n, item in enumerate(macros):
+            print(f"{n:3d}  {item['name']:20s} {macro.describe(macro.parse(item['sequence']))}")
+        if not macros:
+            print("no macros ('infi75 macro save NAME \"ctrl+c 50ms enter\"' adds one)")
+    elif args.macro_cmd == "save":
+        board.save_macro(args.name, args.sequence)
+        print(f"saved macro '{args.name}'; assign it with: infi75 remap KEY 'macro:{args.name}'")
+    elif args.macro_cmd == "delete":
+        board.delete_macro(args.name)
+        print(f"deleted macro '{args.name}'")
+    return 0
+
+
 def cmd_setup(args) -> int:
     board = _board(args)
     if args.setup_cmd == "list":
@@ -586,7 +605,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("key", nargs="?", help="physical key (profile name, or #index); 'infi75 keys' lists them")
     p.add_argument("to", nargs="?",
                    help="target: key name (esc, f13, 0x29), combination (ctrl+c), media key "
-                        "(volup, voldown, mute, playpause, next, prev, stop) or 'default'")
+                        "(volup, voldown, mute, playpause, next, prev, stop), macro:NAME (macro:NAMEx3 "
+                        "repeats it 3 times) or 'default'")
     p.add_argument("--reset", action="store_true", help="restore every key to its default")
     p.add_argument("--list", action="store_true", help="show the remaps written by this tool (both layers)")
     p.add_argument("--fn", action="store_true",
@@ -613,6 +633,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = scr_sub.add_parser("time", help="sync the screen clock")
     p.add_argument("--at", help="ISO timestamp instead of now")
     scr.set_defaults(func=cmd_screen)
+
+    mac = sub.add_parser("macro", help="key sequences a key can play (INFI75)")
+    mac_sub = mac.add_subparsers(dest="macro_cmd", required=True)
+    mac_sub.add_parser("list", help="list saved macros")
+    p = mac_sub.add_parser("save", help="add or replace a macro and write the macro table")
+    p.add_argument("name")
+    p.add_argument("sequence", help="e.g. \"ctrl+c 50ms enter\", \"text:hello\", \"+shift a -shift\", \"mouse1\"")
+    p = mac_sub.add_parser("delete", help="delete a macro (not while a key uses it)")
+    p.add_argument("name")
+    mac.set_defaults(func=cmd_macro)
 
     st = sub.add_parser("setup", help="saved setups: lighting, colours, remaps, game mode and screen together")
     st_sub = st.add_subparsers(dest="setup_cmd", required=True)

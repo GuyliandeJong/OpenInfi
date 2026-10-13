@@ -25,7 +25,7 @@ from .. import profile as profiles
 from ..board import InfiBoard
 from ..transport import DeviceError
 from . import theme
-from .pages import ColoursPage, DevicePage, LightingPage, RemapPage, ScreenPage, SettingsPage
+from .pages import ColoursPage, DevicePage, LightingPage, MacrosPage, RemapPage, ScreenPage, SettingsPage
 from .widgets import Toast, button
 
 
@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         side.addSpacing(14)
         self.nav = QListWidget()
         self.nav.setObjectName("Nav")
-        for name in ("Lighting", "Key colours", "Remap keys", "Screen", "Settings", "Device"):
+        for name in ("Lighting", "Key colours", "Remap keys", "Macros", "Screen", "Settings", "Device"):
             self.nav.addItem(QListWidgetItem(name))
         side.addWidget(self.nav, 1)
         self.sim_chip = QLabel("Simulation mode")
@@ -160,10 +160,13 @@ class MainWindow(QMainWindow):
         self.lighting = LightingPage(board.saved_lighting())
         self.colours = ColoursPage(self.profile, colors, default)
         self.remap = RemapPage(self.profile, board.remaps("base"), board.remaps("fn"))
+        self.macros = MacrosPage(board.macros())
+        self.remap.set_macros([m["name"] for m in board.macros()])
         self.screen = ScreenPage()
         self.settings = SettingsPage(board.system(), board.setups())
         self.device = DevicePage(self.profile, self.simulate)
-        for page in (self.lighting, self.colours, self.remap, self.screen, self.settings, self.device):
+        for page in (self.lighting, self.colours, self.remap, self.macros, self.screen, self.settings,
+                     self.device):
             self.stack.addWidget(page)
         content.addWidget(self.stack, 1)
         holder = QWidget()
@@ -181,6 +184,8 @@ class MainWindow(QMainWindow):
         self.screen.sync_requested.connect(self.sync_clock)
         self.screen.set_auto_sync(clock.installed())
         self.screen.auto_sync_toggled.connect(self.set_auto_sync)
+        self.macros.save_requested.connect(self.save_macro)
+        self.macros.delete_requested.connect(self.delete_macro)
         self.settings.system_requested.connect(self.apply_system)
         self.settings.setup_save_requested.connect(self.save_setup)
         self.settings.setup_apply_requested.connect(self.apply_setup)
@@ -297,6 +302,16 @@ class MainWindow(QMainWindow):
         self.run(label, lambda b: (b.write_remaps(state, layer), state)[1],
                  done=lambda result: self.remap.set_remaps(layer, result))
 
+    def _show_macros(self, macros: list[dict]) -> None:
+        self.macros.set_macros(macros)
+        self.remap.set_macros([m["name"] for m in macros])
+
+    def save_macro(self, name: str, sequence: str) -> None:
+        self.run(f"Saving macro '{name}'", lambda b: b.save_macro(name, sequence), done=self._show_macros)
+
+    def delete_macro(self, name: str) -> None:
+        self.run(f"Deleting macro '{name}'", lambda b: b.delete_macro(name), done=self._show_macros)
+
     def apply_system(self, changes: dict) -> None:
         self.run("Applying game mode and sleep", lambda b: b.set_system(**changes), done=self.settings.set_system)
 
@@ -325,6 +340,7 @@ class MainWindow(QMainWindow):
             self.remap.set_remaps("base", board.remaps("base"))
             self.remap.set_remaps("fn", board.remaps("fn"))
             self.settings.set_system(board.system())
+            self._show_macros(board.macros())
 
         self.run(f"Applying setup '{name}'",
                  lambda b: b.apply_setup(name, include_screen, progress=self.bridge.progress.emit), done=done)

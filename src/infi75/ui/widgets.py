@@ -542,6 +542,80 @@ class KeyCapture(QPushButton):
         super().keyReleaseEvent(event)
 
 
+def key_name_from_event(event: QKeyEvent) -> str | None:
+    """The single physical key of an event (modifiers as lctrl, rshift, ...), without held modifiers."""
+    key = Qt.Key(event.key())
+    if key in _MOD_KEYS:
+        return _MOD_SCANCODES.get(event.nativeScanCode(), _MOD_KEYS[key])
+    return _EVDEV.get(event.nativeScanCode() - 8) or _QT_KEYS.get(key)
+
+
+class MacroRecorder(QPushButton):
+    """Click to start, type the sequence, click again to stop. Emits macro tokens with the real timing."""
+
+    recorded = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__("Record")
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.with_delays = True
+        self.tokens: list[str] = []
+        self._last = 0.0
+        self.toggled.connect(self._toggled)
+
+    def _toggled(self, on: bool) -> None:
+        import time
+
+        if on:
+            self.tokens = []
+            self._last = time.monotonic()
+            self.setText("Recording... click to stop")
+            self.setFocus()
+            self.grabKeyboard()
+        else:
+            self.releaseKeyboard()
+            self.setText("Record")
+            if self.tokens:
+                self.recorded.emit(" ".join(self.tokens))
+
+    def _add(self, token: str) -> None:
+        import time
+
+        now = time.monotonic()
+        gap = int((now - self._last) * 1000)
+        if self.with_delays and self.tokens and gap > 10:
+            self.tokens.append(f"{min(gap, 65535)}ms")
+        self.tokens.append(token)
+        self._last = now
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if not self.isChecked():
+            return super().keyPressEvent(event)
+        name = key_name_from_event(event)
+        if name and not event.isAutoRepeat():
+            self._add(f"+{name}")
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        if not self.isChecked():
+            return super().keyReleaseEvent(event)
+        name = key_name_from_event(event)
+        if name and not event.isAutoRepeat():
+            self._add(f"-{name}")
+
+
+def compact_tokens(text: str) -> str:
+    """Turn '+a -a' pairs without a delay between them into 'a' for readability."""
+    tokens = text.split()
+    out: list[str] = []
+    for token in tokens:
+        if token.startswith("-") and out and out[-1] == "+" + token[1:]:
+            out[-1] = token[1:]
+        else:
+            out.append(token)
+    return " ".join(out)
+
+
 # -------------------------------------------------------------------- toast
 
 

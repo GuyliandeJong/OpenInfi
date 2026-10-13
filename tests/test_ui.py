@@ -109,3 +109,16 @@ def test_settings_page_sends_system_and_lists_setups(app, window):
     window.settings.set_setups(["Gaming", "Work"])
     window.settings.setup_list.setCurrentRow(1)
     assert window.settings.load_button.isEnabled()
+
+
+def test_macro_page_validates_and_saves(app, window):
+    page = window.macros
+    page.name.setText("hello")
+    page.sequence.setPlainText("text:hi 50ms enter")
+    assert page.save_button.isEnabled() and "h, i, 50 ms, enter" in page.preview.text()
+    page.save_button.click()
+    wait(app, window)
+    assert "ok: Saving macro 'hello'" in window.device.log.toPlainText()
+    assert "hello" in window.remap.macro_names
+    page.sequence.setPlainText("nosuchkey")
+    assert not page.save_button.isEnabled()

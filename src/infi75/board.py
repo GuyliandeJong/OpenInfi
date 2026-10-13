@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from . import hfd, screen, usbctl
+from . import hfd, macro, screen, usbctl
 from .profile import Profile
 from .transport import DeviceError, _hid, enumerate_interfaces
 
@@ -33,6 +33,10 @@ def keymap_state_path(layer: str = "base") -> Path:
 
 def system_state_path() -> Path:
     return config_dir() / "system.json"
+
+
+def macros_state_path() -> Path:
+    return config_dir() / "macros.json"
 
 
 def screen_state_path() -> Path:
@@ -65,6 +69,7 @@ SETUP_PARTS = {
     "keymap": lambda: keymap_state_path("base"),
     "keymap_fn": lambda: keymap_state_path("fn"),
     "system": system_state_path,
+    "macros": macros_state_path,
     "screen": screen_state_path,
 }
 
@@ -195,14 +200,14 @@ class InfiBoard:
             key = self.profile.key(name)
             if layer == "fn" and not key.fn:
                 raise ValueError(f"Fn + {key.name} is reserved by the keyboard and cannot be remapped")
-            entries[key.index] = hfd.key_entry(target)
+            entries[key.index] = hfd.key_entry(self._resolve_macro(target))
         self._run(lambda s: s.write_keymap(entries, command))
         if not self.dry_run:
             _save_json(keymap_state_path(layer), state)
 
     def remap(self, key_name: str, target: str, layer: str = "base") -> dict[str, str]:
         key = self.profile.key(key_name)
-        hfd.key_entry(target)  # validate before storing
+        hfd.key_entry(self._resolve_macro(target))  # validate before storing
         state = self.remaps(layer)
         if target.strip().lower() in ("default", "reset"):
             state.pop(key.name, None)
@@ -213,6 +218,78 @@ class InfiBoard:
 
     def reset_remaps(self, layer: str = "base") -> None:
         self.write_remaps({}, layer)
+
+    # -------------------------------------------------------------- macros
+
+    @staticmethod
+    def macros() -> list[dict]:
+        """Saved macros in table order: [{"name": ..., "sequence": ...}]."""
+        return _load_json(macros_state_path(), [])
+
+    def _macro_ref(self, target: str) -> tuple[int, int] | None:
+        """(table index, repeat count) for 'macro:NAME' / 'macro:NAMExCOUNT', None for other targets."""
+        spec = target.strip()
+        if not spec.lower().startswith("macro:"):
+            return None
+        names = [m["name"].lower() for m in self.macros()]
+        name, count = spec[6:], "1"
+        if name.lower() not in names:  # names may contain an x, so try the exact name first
+            head, sep, tail = name.rpartition("x")
+            if sep and tail.isdigit():
+                name, count = head, tail
+        if name.lower() not in names:
+            raise ValueError(f"no macro named {name!r}; 'infi75 macro list' shows them")
+        return names.index(name.lower()), int(count)
+
+    def _resolve_macro(self, target: str) -> str:
+        """'macro:NAME[xCOUNT]' -> 'macro:INDEXxCOUNT' for hfd.key_entry; other targets unchanged."""
+        ref = self._macro_ref(target)
+        return target if ref is None else f"macro:{ref[0]}x{ref[1]}"
+
+    def write_macros(self, macros: list[dict]) -> None:
+        events = [macro.parse(m["sequence"]) for m in macros]
+        names = [m["name"].lower() for m in macros]
+        if len(set(names)) != len(names):
+            raise ValueError("macro names must be unique")
+        self._run(lambda s: s.write_macros(events))
+        if not self.dry_run:
+            _save_json(macros_state_path(), macros)
+
+    def save_macro(self, name: str, sequence: str) -> list[dict]:
+        """Add a macro, or replace the one with the same name; writes the whole table."""
+        name = name.strip()
+        if not name or ":" in name:
+            raise ValueError("a macro needs a name without ':'")
+        macro.parse(sequence)  # validate before writing
+        macros = self.macros()
+        for item in macros:
+            if item["name"].lower() == name.lower():
+                item.update(name=name, sequence=sequence)
+                break
+        else:
+            macros.append({"name": name, "sequence": sequence})
+        self.write_macros(macros)
+        return macros
+
+    def delete_macro(self, name: str) -> list[dict]:
+        macros = self.macros()
+        names = [m["name"].lower() for m in macros]
+        if name.strip().lower() not in names:
+            raise ValueError(f"no macro named {name!r}")
+        index = names.index(name.strip().lower())
+        users = [f"{'Fn+' if layer == 'fn' else ''}{key}" for layer in LAYERS
+                 for key, target in self.remaps(layer).items()
+                 if (ref := self._macro_ref(target)) is not None and ref[0] == index]
+        if users:
+            raise ValueError(f"macro {name!r} is used by {', '.join(users)}; restore those keys first")
+        remaining = macros[:index] + macros[index + 1:]
+        self.write_macros(remaining)
+        # remaps point at table positions, which shifted: rewrite layers that use macros
+        for layer in LAYERS:
+            state = self.remaps(layer)
+            if any(t.lower().startswith("macro:") for t in state.values()):
+                self.write_remaps(state, layer)
+        return remaining
 
     # -------------------------------------------------------------- system
 
@@ -298,6 +375,9 @@ class InfiBoard:
         """Write a saved setup to the keyboard. Returns what was applied."""
         parts = self.load_setup(name)["parts"]
         done = []
+        if "macros" in parts:
+            self.write_macros(parts["macros"])
+            done.append("macros")
         if "system" in parts:
             fields = hfd.System.__dataclass_fields__
             self.set_system(**{k: v for k, v in parts["system"].items() if k in fields})

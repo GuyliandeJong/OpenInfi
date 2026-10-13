@@ -35,7 +35,9 @@ from PySide6.QtWidgets import (
 
 from .. import hfd, screen
 from . import theme
-from .widgets import ColorPicker, KeyboardView, KeyCapture, button, card, muted, section
+from .. import macro
+from .widgets import (ColorPicker, KeyboardView, KeyCapture, MacroRecorder, button, card,
+                      compact_tokens, muted, section)
 
 # Effect catalogue as presented to the user. Behaviour notes come from tests
 # on an INFI75-1.2; "colour" and "direction" mark the controls an effect uses.
@@ -515,6 +517,8 @@ _MOD_WORDS = {"ctrl": "Ctrl", "shift": "Shift", "alt": "Alt", "win": "Super", "g
 
 def describe_target(target: str) -> str:
     """Human name for a remap target: "ctrl+c" -> "Ctrl + C"."""
+    if target.lower().startswith("macro:"):
+        return f"Macro {target[6:]}"
     parts = target.split("+")
     words = [_MOD_WORDS.get(p) or _LABELS.get(p) or p.upper() for p in parts]
     return " + ".join(words)
@@ -537,6 +541,7 @@ class RemapPage(Page):
         self.profile = profile
         self.layer = "base"
         self.layers = {"base": dict(remaps), "fn": dict(fn_remaps or {})}
+        self.macro_names: list[str] = []
         self.remaps = self.layers["base"]
         row = QHBoxLayout()
         row.setSpacing(16)
@@ -632,10 +637,15 @@ class RemapPage(Page):
         except KeyError:
             return False
 
+    def set_macros(self, names: list[str]) -> None:
+        self.macro_names = list(names)
+        self._fill_targets(self.search.text())
+
     def _fill_targets(self, text: str) -> None:
         text = text.strip().lower()
         self.targets.clear()
-        for group, items in TARGET_GROUPS:
+        macros = [(f"macro:{n}", f"Macro: {n}") for n in getattr(self, "macro_names", [])]
+        for group, items in ([("Macros", macros)] if macros else []) + TARGET_GROUPS:
             matches = [(k, l) for k, l in items if not text or text in k or text in l.lower()]
             if not matches:
                 continue
@@ -680,7 +690,11 @@ class RemapPage(Page):
         if not target:
             return
         try:
-            hfd.key_entry(target)
+            if target.lower().startswith("macro:"):
+                if target[6:].lower() not in (n.lower() for n in self.macro_names):
+                    raise ValueError(f"no macro named {target[6:]!r}")
+            else:
+                hfd.key_entry(target)
         except (KeyError, ValueError) as exc:
             self.choice.setText(f"⚠ {exc.args[0] if exc.args else exc}")
             self.pending = None
@@ -943,6 +957,131 @@ class ScreenPage(Page):
 
     def upload_finished(self) -> None:
         self.progress.hide()
+
+
+# -------------------------------------------------------------------- macros
+
+
+class MacrosPage(Page):
+    save_requested = Signal(str, str)
+    delete_requested = Signal(str)
+
+    def __init__(self, macros: list[dict]) -> None:
+        super().__init__("Macros", "A macro plays a sequence of keys. Record one or type it, save it, then "
+                                   "assign it to a key on the Remap keys page.")
+        self.macros = list(macros)
+        row = QHBoxLayout()
+        row.setSpacing(16)
+        self.body.addLayout(row, 1)
+
+        listing, list_layout = card("Saved macros")
+        listing.setFixedWidth(300)
+        self.list = QListWidget()
+        list_layout.addWidget(self.list, 1)
+        self.new_button = button("New macro")
+        list_layout.addWidget(self.new_button)
+        row.addWidget(listing)
+
+        editor, edit_layout = card("Macro")
+        edit_layout.addWidget(section("Name"))
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("e.g. signature, copy-paste")
+        edit_layout.addWidget(self.name)
+        edit_layout.addWidget(section("Sequence"))
+        record_row = QHBoxLayout()
+        self.recorder = MacroRecorder()
+        record_row.addWidget(self.recorder)
+        self.with_delays = QCheckBox("Keep my timing")
+        self.with_delays.setChecked(True)
+        self.with_delays.setToolTip("Off: keys follow each other 10 ms apart")
+        record_row.addWidget(self.with_delays)
+        record_row.addStretch(1)
+        edit_layout.addLayout(record_row)
+        self.sequence = QPlainTextEdit()
+        self.sequence.setPlaceholderText("ctrl+c 50ms enter   ·   text:hello   ·   +shift a -shift   ·   mouse1")
+        self.sequence.setMaximumHeight(110)
+        edit_layout.addWidget(self.sequence)
+        edit_layout.addWidget(muted("Keys press and release (ctrl+c holds Ctrl around C). +key holds, -key releases. "
+                                    "50ms waits. text:Hello types letters and digits (_ for space). mouse1-3 click."))
+        self.preview = QLabel("")
+        self.preview.setWordWrap(True)
+        self.preview.setStyleSheet(f"color:{theme.TEXT}; font-weight:600;")
+        edit_layout.addWidget(self.preview)
+        edit_layout.addStretch(1)
+        actions = QHBoxLayout()
+        self.delete_button = button("Delete", danger=True)
+        self.save_button = button("Save to keyboard", primary=True)
+        actions.addWidget(self.delete_button)
+        actions.addStretch(1)
+        actions.addWidget(self.save_button)
+        edit_layout.addLayout(actions)
+        row.addWidget(editor, 1)
+
+        self.list.currentItemChanged.connect(lambda *_: self._load_selected())
+        self.new_button.clicked.connect(self._new)
+        self.recorder.recorded.connect(lambda text: self.sequence.setPlainText(compact_tokens(text)))
+        self.with_delays.toggled.connect(lambda on: setattr(self.recorder, "with_delays", on))
+        self.sequence.textChanged.connect(self._validate)
+        self.name.textChanged.connect(self._validate)
+        self.save_button.clicked.connect(
+            lambda: self.save_requested.emit(self.name.text().strip(), self.sequence.toPlainText().strip()))
+        self.delete_button.clicked.connect(self._delete)
+        self.set_macros(self.macros)
+
+    def set_macros(self, macros: list[dict]) -> None:
+        current = self.name.text().strip()
+        self.macros = list(macros)
+        self.list.blockSignals(True)
+        self.list.clear()
+        for item in self.macros:
+            self.list.addItem(item["name"])
+        if not self.macros:
+            empty = QListWidgetItem("No macros yet.")
+            empty.setFlags(Qt.NoItemFlags)
+            self.list.addItem(empty)
+        self.list.blockSignals(False)
+        matches = self.list.findItems(current, Qt.MatchFixedString) if current else []
+        if matches:
+            self.list.setCurrentItem(matches[0])
+        elif self.macros:
+            self.list.setCurrentRow(0)
+        else:
+            self._new()
+        self._validate()
+
+    def _load_selected(self) -> None:
+        item = self.list.currentItem()
+        found = next((m for m in self.macros if item and m["name"] == item.text()), None)
+        if found:
+            self.name.setText(found["name"])
+            self.sequence.setPlainText(found["sequence"])
+
+    def _new(self) -> None:
+        self.list.clearSelection()
+        self.name.clear()
+        self.sequence.clear()
+        self.name.setFocus()
+
+    def _validate(self) -> None:
+        text = self.sequence.toPlainText().strip()
+        ok = False
+        if not text:
+            self.preview.setText("")
+        else:
+            try:
+                events = macro.parse(text)
+                self.preview.setText(f"Plays: {macro.describe(events)}")
+                ok = True
+            except ValueError as exc:
+                self.preview.setText(f"⚠ {exc}")
+        name = self.name.text().strip()
+        self.save_button.setEnabled(ok and bool(name) and ":" not in name)
+        self.delete_button.setEnabled(any(m["name"].lower() == name.lower() for m in self.macros))
+
+    def _delete(self) -> None:
+        name = self.name.text().strip()
+        if name and QMessageBox.question(self, "Delete macro", f"Delete the macro '{name}'?") == QMessageBox.Yes:
+            self.delete_requested.emit(name)
 
 
 # ------------------------------------------------------------------ settings

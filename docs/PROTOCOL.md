@@ -170,7 +170,7 @@ return to default. An all-zero table resets every remap.
 | `02 bb 00 00` | modifier key alone (`bb` = its bit) |
 | `03 lo hi 00` | consumer usage `0xhilo` (media key) |
 | `01 ...` | mouse button (decoded, not implemented) |
-| `06 id ...` | macro (decoded, not implemented) |
+| `06 nn mm cc` | macro `nn` (table index), mode `mm`, count `cc` (section 4b) |
 
 Modifier bits: `01` LCtrl, `02` LShift, `04` LAlt, `08` LGui, `10` RCtrl,
 `20` RShift, `40` RAlt, `80` RGui. Media usages offered by the driver:
@@ -200,6 +200,40 @@ built-in Fn function.
 `KeyboardLayout.xml` marks Esc, F5, F6, Backspace, `\|`, Win and Fn with
 `fnlayer_disable="1"`; the vendor UI does not let them be changed on the
 Fn layer, and `infi75` refuses them as well.
+
+## 4b. Macros (decoded, implemented, not yet confirmed on hardware)
+
+From `DeviceDriver.exe` (functions at `0x42fa50` and `0x416800`). The
+upload has no START or FINISH:
+
+```
+04 19                    MACRO BEGIN, no data
+04 15 .. .. nn           MACROS, nn = packets announced
+<nn + 1 data packets>    the driver sends one more (zero) packet than announced
+04 02                    SAVE
+```
+
+The data is one buffer (at most `0xe00` bytes):
+
+| Offset | Content |
+|---|---|
+| 0-399 | 100 entries of 4 bytes: little-endian offset of macro `n`, or `ff ff ff ff` when it has no events |
+| offset + 0-1 | number of events (little-endian); bytes 2-7 zero |
+| offset + 8 | events, 4 bytes each |
+| buffer end - 2 | `aa 55`; the buffer is `nn` x 64 bytes, `nn` = ceil(used / 64) + 1 |
+
+| Event | Bytes |
+|---|---|
+| key down | `00 00 uu b0` (`uu` = HID usage) |
+| key up | `00 00 uu 30` |
+| mouse button down / up | `00 00 bb 90` / `00 00 bb 10`; `bb` = 1, 4, 2 for the driver's buttons 1, 2, 3 |
+| delay | `lo hi 00 50`, milliseconds |
+
+The driver inserts a 10 ms delay between two events that have no delay
+between them. A key plays macro `nn` through the keymap entry
+`06 nn mm cc`: `mm` is the driver's "macrotype" and `cc` its
+"macrovalue". `infi75` uses `mm` = 1 with `cc` as a repeat count; the
+other modes are not decoded.
 
 ## 5. Per-key colours (confirmed)
 
@@ -301,7 +335,7 @@ A still image is 16 chunks; the 20-frame test GIF was 318 chunks.
 | `04 15` | unknown, with data | not decoded |
 | `04 19` | unknown | not decoded |
 | `04 f5` | read back state | not decoded |
-| macros | entry type `06` plus macro storage | not decoded |
+| macro modes | keymap entry `06` byte 2 values other than 1 | not decoded |
 
 ## 10. Firmware updaters (warning)
 
