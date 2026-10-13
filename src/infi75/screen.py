@@ -11,6 +11,28 @@ def rgb565(r: int, g: int, b: int) -> int:
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
 
+def fit_frame(image: Image.Image, width: int, height: int, fit: str = "crop") -> Image.Image:
+    """Scale to width x height: "crop" fills and crops, "stretch" distorts, "pad" letterboxes."""
+    source = image.convert("RGB")
+    size = (width, height)
+    if fit == "stretch":
+        return source.resize(size, Image.Resampling.LANCZOS)
+    if fit == "pad":
+        return ImageOps.pad(source, size, Image.Resampling.LANCZOS, color=(0, 0, 0))
+    return ImageOps.fit(source, size, Image.Resampling.LANCZOS)
+
+
+def preview_frames(path: str | Path, width: int, height: int, max_frames: int,
+                   fit: str = "crop") -> list[tuple[Image.Image, int]]:
+    """Fitted RGB frames and durations, as they will appear on the screen."""
+    frames = []
+    with Image.open(path) as image:
+        for n in range(min(getattr(image, "n_frames", 1), max_frames)):
+            image.seek(n)
+            frames.append((fit_frame(image, width, height, fit), int(image.info.get("duration", 100) or 100)))
+    return frames
+
+
 def encode(image: Image.Image, width: int, height: int, transpose: bool = True,
            byteorder: str = "big", fit: str = "crop") -> bytes:
     """Scale *image* to width x height and return RGB565 bytes.
@@ -20,14 +42,7 @@ def encode(image: Image.Image, width: int, height: int, transpose: bool = True,
     *transpose* the pixels are emitted column by column, which is the
     order the RT100 firmware expects.
     """
-    source = image.convert("RGB")
-    size = (width, height)
-    if fit == "stretch":
-        frame = source.resize(size, Image.Resampling.LANCZOS)
-    elif fit == "pad":
-        frame = ImageOps.pad(source, size, Image.Resampling.LANCZOS, color=(0, 0, 0))
-    else:
-        frame = ImageOps.fit(source, size, Image.Resampling.LANCZOS)
+    frame = fit_frame(image, width, height, fit)
     if transpose:
         frame = frame.transpose(Image.Transpose.TRANSPOSE)
     raw = frame.tobytes()

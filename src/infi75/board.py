@@ -32,6 +32,22 @@ def colors_state_path() -> Path:
     return config_dir() / "colors.json"
 
 
+def lighting_state_path() -> Path:
+    return config_dir() / "lighting.json"
+
+
+def _save_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True))
+
+
+def _load_json(path: Path, default):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return default
+
+
 class InfiBoard:
     def __init__(self, profile: Profile, vendor_id: int | None = None, product_id: int | None = None,
                  dry_run: bool = False, log: Callable[[str], None] | None = None) -> None:
@@ -75,6 +91,14 @@ class InfiBoard:
         settings = hfd.Lighting(mode=mode, color=tuple(color), rainbow=rainbow, brightness=brightness,
                                 speed=speed, direction=hfd.DIRECTIONS[direction])
         self._run(lambda s: s.set_lighting(settings))
+        if not self.dry_run:
+            _save_json(lighting_state_path(), {"effect": effect, "color": list(color), "brightness": brightness,
+                                               "speed": speed, "rainbow": rainbow, "direction": direction})
+
+    @staticmethod
+    def saved_lighting() -> dict:
+        """The lighting last applied by this tool, or {} if unknown."""
+        return _load_json(lighting_state_path(), {})
 
     def set_key_colors(self, colors: dict[str, tuple[int, int, int]], default=(0, 0, 0),
                        brightness: int = 5) -> None:
@@ -82,10 +106,8 @@ class InfiBoard:
         table = {key.index: chosen.get(key.name, tuple(default)) for key in self.profile.keys}
         self._run(lambda s: s.set_key_colors(table, brightness=brightness))
         if not self.dry_run:
-            path = colors_state_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps({"default": list(default),
-                                        "keys": {k: list(v) for k, v in sorted(chosen.items())}}, indent=2))
+            _save_json(colors_state_path(), {"default": list(default),
+                                             "keys": {k: list(v) for k, v in sorted(chosen.items())}})
 
     def saved_colors(self) -> tuple[dict[str, tuple[int, int, int]], tuple[int, int, int]]:
         """The per-key colours last written by this tool: ({key: rgb}, default)."""
@@ -116,20 +138,14 @@ class InfiBoard:
     # -------------------------------------------------------------- keymap
 
     def remaps(self) -> dict[str, str]:
-        path = keymap_state_path()
-        try:
-            return json.loads(path.read_text()) if path.exists() else {}
-        except (OSError, ValueError):
-            return {}
+        return _load_json(keymap_state_path(), {})
 
     def write_remaps(self, state: dict[str, str]) -> None:
         """Write the full base-layer table; keys not in *state* keep their default."""
         entries = {self.profile.key(name).index: hfd.key_entry(target) for name, target in state.items()}
         self._run(lambda s: s.write_keymap(entries))
         if not self.dry_run:
-            path = keymap_state_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(state, indent=2, sort_keys=True))
+            _save_json(keymap_state_path(), state)
 
     def remap(self, key_name: str, target: str) -> dict[str, str]:
         key = self.profile.key(key_name)
@@ -172,3 +188,44 @@ class InfiBoard:
                 device.open_path(interface.path)
                 return device
         raise DeviceError(f"screen interface {hfd.SCREEN_INTERFACE} not found")
+
+    # ----------------------------------------------------------- diagnostics
+
+    def diagnose(self) -> dict[str, tuple[bool | None, str]]:
+        """Read-only health check: {item: (ok, text)}; ok is None when not applicable."""
+        report: dict[str, tuple[bool | None, str]] = {}
+        state = self.connection()
+        report["connection"] = {
+            "usb": (True, "USB cable (wired mode)"),
+            "bluetooth": (False, "Bluetooth only: settings need the USB cable"),
+            "none": (False, "Not found"),
+        }[state]
+        if state == "usb":
+            try:
+                import usb.core
+                import usb.util
+
+                dev = usb.core.find(idVendor=self.vendor_id, idProduct=self.product_id)
+                version = dev.bcdDevice
+                firmware = f"{version >> 8}.{version & 0xFF:02x}"
+                try:
+                    product = usb.util.get_string(dev, dev.iProduct)
+                    firmware += f" ({product})"
+                except Exception:  # needs access to the device node
+                    pass
+                report["firmware"] = (None, firmware)
+            except Exception as exc:
+                report["firmware"] = (None, f"unknown ({exc})")
+            try:
+                with usbctl.UsbHid(self.vendor_id, self.product_id, hfd.CONFIG_INTERFACE) as link:
+                    descriptor = link.report_descriptor()
+                ok = descriptor[:3] == b"\x06\x13\xff"
+                report["config"] = (ok, "OK (interface 3)" if ok else "unexpected descriptor")
+            except Exception as exc:
+                report["config"] = (False, f"not accessible: {exc}")
+            screen_ok = any(i.interface == hfd.SCREEN_INTERFACE
+                            for i in enumerate_interfaces(self.vendor_id, self.product_id or 0))
+            report["screen"] = (screen_ok, "OK (interface 2)" if screen_ok else "not accessible")
+        rule = Path("/etc/udev/rules.d/70-infi75.rules")
+        report["udev"] = (rule.exists(), "installed" if rule.exists() else "not installed")
+        return report
