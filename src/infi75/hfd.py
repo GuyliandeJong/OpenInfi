@@ -112,7 +112,7 @@ class Session:
 
     def __init__(self, link: FeatureLink | None, dry_run: bool = False,
                  log: Callable[[str], None] | None = None, delay: float = 0.01,
-                 busy_polls: int = 50, busy_delay: float = 0.02) -> None:
+                 busy_polls: int = 150, busy_delay: float = 0.02) -> None:
         self.link = link
         self.dry_run = dry_run
         self.log = log or (lambda msg: print(msg, file=sys.stderr))
